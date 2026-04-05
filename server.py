@@ -9,27 +9,33 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 @app.route("/")
 def home():
-    return "Server is running!"
+    return jsonify({"status": "ok"})
 
 @app.route("/transcribe", methods=["POST"])
 def transcribe():
-    if "file" not in request.files:
-        return jsonify({"error": "No file uploaded"}), 400
+    try:
+        if "file" not in request.files:
+            return jsonify({"error": "No file uploaded"})
 
-    audio_file = request.files["file"]
+        audio_file = request.files["file"]
 
-    with tempfile.NamedTemporaryFile(delete=False) as tmp:
-        audio_file.save(tmp.name)
+        with tempfile.NamedTemporaryFile(delete=False) as tmp:
+            audio_file.save(tmp.name)
 
-        with open(tmp.name, "rb") as f:
-            transcription = client.audio.transcriptions.create(
-                model="gpt-4o-transcribe",
-                file=f
-            )
+            with open(tmp.name, "rb") as f:
+                transcription = client.audio.transcriptions.create(
+                    model="gpt-4o-transcribe",
+                    file=f
+                )
 
-    return jsonify({
-        "text": transcription.text
-    })
+        return jsonify({
+            "text": transcription.text
+        })
+
+    except Exception as e:
+        return jsonify({
+            "error": str(e)
+        })
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080)
