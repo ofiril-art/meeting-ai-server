@@ -1,44 +1,45 @@
 from flask import Flask, request, jsonify
-from openai import OpenAI
 import os
 import tempfile
+from openai import OpenAI
 
 app = Flask(__name__)
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-
-@app.route("/", methods=["GET"])
-def home():
-    return jsonify({"status": "ok"})
-
-
 @app.route("/transcribe", methods=["POST"])
 def transcribe():
-    temp_path = None
-
     try:
         if "file" not in request.files:
             return jsonify({"error": "No file uploaded"}), 400
 
-        uploaded_file = request.files["file"]
+        file = request.files["file"]
 
-        if uploaded_file.filename == "":
-            return jsonify({"error": "Empty filename"}), 400
+        # שמירה זמנית
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".m4a") as temp_audio:
+            file.save(temp_audio.name)
+            temp_path = temp_audio.name
 
-        suffix = os.path.splitext(uploaded_file.filename)[1] or ".m4a"
-
-        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_file:
-            uploaded_file.save(temp_file.name)
-            temp_path = temp_file.name
-
+        # 🔥 תמלול משופר MULTI-LANGUAGE
         with open(temp_path, "rb") as audio_file:
             transcription = client.audio.transcriptions.create(
-                model="gpt-4o-mini-transcribe",
+                model="gpt-4o-transcribe",
                 file=audio_file,
-                # 👇 זה הקסם
-                language="he"
+
+                # 🔥 חשוב מאוד — לא לנעול שפה
+                # language="he", ❌ למחוק!
+
+                # 🔥 הנחיה חכמה לשיחה מעורבת
+                prompt="""
+                This is a business meeting that may include Hebrew and English.
+                - Keep Hebrew in Hebrew.
+                - Keep English in English.
+                - Do NOT translate between languages.
+                - Preserve original spoken language exactly.
+                """
             )
+
+        os.remove(temp_path)
 
         return jsonify({
             "text": transcription.text
@@ -49,11 +50,11 @@ def transcribe():
             "error": str(e)
         }), 500
 
-    finally:
-        if temp_path and os.path.exists(temp_path):
-            os.remove(temp_path)
+
+@app.route("/")
+def home():
+    return "Transcription server is running 🚀"
 
 
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", 8080))
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=5000)
