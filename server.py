@@ -10,27 +10,13 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 
 def basic_cleanup(text: str) -> str:
-    """
-    ניקוי טכני בלבד.
-    חשוב: לא משנה שפה, לא מתרגם, לא משכתב.
-    """
     if not text:
         return ""
 
     result = text.strip()
-
-    # רווחים כפולים
     result = re.sub(r"[ \t]+", " ", result)
-
-    # רווחים לפני סימני פיסוק
     result = re.sub(r"\s+([,.;:!?])", r"\1", result)
-
-    # רווחים אחרי סימני פיסוק אם חסר
     result = re.sub(r"([,.;:!?])([^\s])", r"\1 \2", result)
-
-    # ניקוי שורות ריקות כפולות
-    result = re.sub(r"\n{3,}", "\n\n", result)
-
     return result.strip()
 
 
@@ -44,33 +30,56 @@ def transcribe():
 
         uploaded_file = request.files["file"]
 
-        if uploaded_file.filename == "":
-            return jsonify({"error": "Empty filename"}), 400
-
         suffix = os.path.splitext(uploaded_file.filename)[1] or ".m4a"
 
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_file:
             uploaded_file.save(temp_file.name)
             temp_path = temp_file.name
 
+        # ===== תמלול =====
         with open(temp_path, "rb") as audio_file:
             transcription = client.audio.transcriptions.create(
                 model="gpt-4o-transcribe",
                 file=audio_file,
                 prompt="""
-This is a business meeting that may include Hebrew and English.
-
-Rules:
-- Keep Hebrew in Hebrew.
-- Keep English in English.
-- Do NOT translate between languages.
-- Preserve the exact spoken words as much as possible.
-- Keep mixed-language sentences intact.
+Keep Hebrew in Hebrew.
+Keep English in English.
+Do not translate.
 """
             )
 
         raw_text = (transcription.text or "").strip()
-        cleaned_text = basic_cleanup(raw_text)
+
+        # ===== תיקון סדר משפט בלבד =====
+        fix_response = client.responses.create(
+            model="gpt-4.1-mini",
+            input=[
+                {
+                    "role": "system",
+                    "content": """
+You receive a transcript that may mix Hebrew and English.
+
+Your job:
+- Fix ONLY word order if it is broken
+- Keep ALL words exactly the same
+- Do NOT translate anything
+- Do NOT remove words
+- Do NOT add words
+- Do NOT summarize
+- Keep mixed-language sentences natural
+
+Return the corrected sentence only.
+"""
+                },
+                {
+                    "role": "user",
+                    "content": raw_text
+                }
+            ]
+        )
+
+        fixed_text = (fix_response.output_text or "").strip()
+        cleaned_text = basic_cleanup(fixed_text)
 
         return jsonify({
             "raw_text": raw_text,
@@ -78,9 +87,7 @@ Rules:
         })
 
     except Exception as e:
-        return jsonify({
-            "error": str(e)
-        }), 500
+        return jsonify({"error": str(e)}), 500
 
     finally:
         if temp_path and os.path.exists(temp_path):
