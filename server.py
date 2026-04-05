@@ -1,6 +1,7 @@
 from flask import Flask, request, jsonify
 import os
 import re
+import json
 import tempfile
 from openai import OpenAI
 
@@ -19,6 +20,53 @@ def basic_cleanup(text: str) -> str:
     result = re.sub(r"([,.;:!?])([^\s])", r"\1 \2", result)
     result = re.sub(r"\n{3,}", "\n\n", result)
     return result.strip()
+
+
+def add_readable_paragraphs(text: str) -> str:
+    """
+    שיפור קטן עם אפקט גדול:
+    הופך את התמלול לפסקאות קריאות בלי לשנות תוכן ובלי לתרגם.
+    """
+    if not text:
+        return ""
+
+    sentences = re.split(r"(?<=[.!?])\s+", text.strip())
+    sentences = [s.strip() for s in sentences if s.strip()]
+
+    if not sentences:
+        return text.strip()
+
+    paragraphs = []
+    current = []
+
+    for i, sentence in enumerate(sentences, start=1):
+        current.append(sentence)
+
+        if len(current) >= 2:
+            paragraphs.append(" ".join(current))
+            current = []
+
+    if current:
+        paragraphs.append(" ".join(current))
+
+    return "\n\n".join(paragraphs).strip()
+
+
+def json_from_text(text: str):
+    text = (text or "").strip()
+
+    try:
+        return json.loads(text)
+    except Exception:
+        pass
+
+    start = text.find("{")
+    end = text.rfind("}")
+
+    if start != -1 and end != -1 and end > start:
+        return json.loads(text[start:end + 1])
+
+    raise ValueError("No valid JSON found")
 
 
 @app.route("/transcribe", methods=["POST"])
@@ -58,6 +106,7 @@ Rules:
 
         raw_text = (transcription.text or "").strip()
         cleaned_text = basic_cleanup(raw_text)
+        formatted_text = add_readable_paragraphs(cleaned_text)
 
         summary_response = client.responses.create(
             model="gpt-4.1-mini",
@@ -83,7 +132,7 @@ Rules:
                 },
                 {
                     "role": "user",
-                    "content": cleaned_text
+                    "content": formatted_text
                 }
             ]
         )
@@ -95,6 +144,7 @@ Rules:
             parsed = json_from_text(summary_response.output_text)
             summary_text = parsed.get("summary", "") if isinstance(parsed, dict) else ""
             action_items = parsed.get("action_items", []) if isinstance(parsed, dict) else []
+
             if not isinstance(action_items, list):
                 action_items = []
         except Exception:
@@ -103,7 +153,7 @@ Rules:
 
         return jsonify({
             "raw_text": raw_text,
-            "text": cleaned_text,
+            "text": formatted_text,
             "summary": summary_text,
             "action_items": action_items
         })
@@ -116,25 +166,6 @@ Rules:
     finally:
         if temp_path and os.path.exists(temp_path):
             os.remove(temp_path)
-
-
-def json_from_text(text: str):
-    import json
-
-    text = (text or "").strip()
-
-    try:
-        return json.loads(text)
-    except Exception:
-        pass
-
-    start = text.find("{")
-    end = text.rfind("}")
-
-    if start != -1 and end != -1 and end > start:
-        return json.loads(text[start:end + 1])
-
-    raise ValueError("No valid JSON found")
 
 
 @app.route("/", methods=["GET"])
