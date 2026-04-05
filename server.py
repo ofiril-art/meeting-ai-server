@@ -1,5 +1,6 @@
 from flask import Flask, request, jsonify
 import os
+import re
 import tempfile
 from openai import OpenAI
 
@@ -8,61 +9,29 @@ app = Flask(__name__)
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 
-def fix_bidirectional_text(text: str) -> str:
+def basic_cleanup(text: str) -> str:
     """
-    מוסיף סימני כיווניות כדי שטקסט משולב עברית/אנגלית
-    יוצג בצורה יציבה יותר באפליקציות כמו Notes / iOS / macOS.
+    ניקוי טכני בלבד.
+    חשוב: לא משנה שפה, לא מתרגם, לא משכתב.
     """
-    LTR = "\u200E"
-    RTL = "\u200F"
+    if not text:
+        return ""
 
-    result = []
-    current = ""
-    current_mode = None  # "he" / "non-he"
+    result = text.strip()
 
-    def char_mode(ch: str) -> str:
-        if "\u0590" <= ch <= "\u05FF":
-            return "he"
-        return "non-he"
+    # רווחים כפולים
+    result = re.sub(r"[ \t]+", " ", result)
 
-    for ch in text:
-        # שומרים רווחים וסימני ירידת שורה כחלק מהקטע הנוכחי
-        if ch == "\n":
-            if current:
-                if current_mode == "he":
-                    result.append(RTL + current + RTL)
-                else:
-                    result.append(LTR + current + LTR)
-                current = ""
-                current_mode = None
-            result.append("\n")
-            continue
+    # רווחים לפני סימני פיסוק
+    result = re.sub(r"\s+([,.;:!?])", r"\1", result)
 
-        mode = char_mode(ch)
+    # רווחים אחרי סימני פיסוק אם חסר
+    result = re.sub(r"([,.;:!?])([^\s])", r"\1 \2", result)
 
-        if current_mode is None:
-            current_mode = mode
-            current = ch
-            continue
+    # ניקוי שורות ריקות כפולות
+    result = re.sub(r"\n{3,}", "\n\n", result)
 
-        if mode == current_mode:
-            current += ch
-        else:
-            if current_mode == "he":
-                result.append(RTL + current + RTL)
-            else:
-                result.append(LTR + current + LTR)
-
-            current = ch
-            current_mode = mode
-
-    if current:
-        if current_mode == "he":
-            result.append(RTL + current + RTL)
-        else:
-            result.append(LTR + current + LTR)
-
-    return "".join(result)
+    return result.strip()
 
 
 @app.route("/transcribe", methods=["POST"])
@@ -90,48 +59,18 @@ def transcribe():
                 file=audio_file,
                 prompt="""
 This is a business meeting that may include Hebrew and English.
-Keep Hebrew in Hebrew.
-Keep English in English.
-Do not translate between languages.
-Preserve the original spoken language exactly.
+
+Rules:
+- Keep Hebrew in Hebrew.
+- Keep English in English.
+- Do NOT translate between languages.
+- Preserve the exact spoken words as much as possible.
+- Keep mixed-language sentences intact.
 """
             )
 
         raw_text = (transcription.text or "").strip()
-
-        cleanup_response = client.responses.create(
-            model="gpt-4.1-mini",
-            input=[
-                {
-                    "role": "system",
-                    "content": """
-You clean business meeting transcripts.
-
-Rules:
-- Preserve original languages exactly.
-- Keep Hebrew in Hebrew.
-- Keep English in English.
-- Do not translate.
-- Improve punctuation and spacing.
-- Remove obvious duplicated fragments if they are clearly accidental.
-- Format the transcript into readable sentences and short paragraphs.
-- Do NOT break lines based on language switches.
-- Keep mixed-language sentences intact, for example: Hebrew with English words inside the same sentence.
-- Only break lines between full sentences or clear topic changes.
-- Do not add content that was not spoken.
-- Do not summarize.
-- Return only the cleaned transcript text.
-"""
-                },
-                {
-                    "role": "user",
-                    "content": raw_text
-                }
-            ]
-        )
-
-        cleaned_text = (cleanup_response.output_text or "").strip()
-        cleaned_text = fix_bidirectional_text(cleaned_text)
+        cleaned_text = basic_cleanup(raw_text)
 
         return jsonify({
             "raw_text": raw_text,
