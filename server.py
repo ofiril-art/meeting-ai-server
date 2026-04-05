@@ -7,6 +7,7 @@ app = Flask(__name__)
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
+
 @app.route("/transcribe", methods=["POST"])
 def transcribe():
     temp_path = None
@@ -31,35 +32,35 @@ def transcribe():
                 model="gpt-4o-transcribe",
                 file=audio_file,
                 prompt="""
-                This is a business meeting that may include Hebrew and English.
-                - Keep Hebrew in Hebrew.
-                - Keep English in English.
-                - Do NOT translate between languages.
-                - Preserve the original spoken language exactly.
-                """
+This is a business meeting that may include Hebrew and English.
+Keep Hebrew in Hebrew.
+Keep English in English.
+Do not translate between languages.
+Preserve the original spoken language exactly.
+"""
             )
 
-        raw_text = transcription.text or ""
+        raw_text = (transcription.text or "").strip()
 
-        # שדרוג איכות: ניקוי ופיסוק בלי לתרגם
         cleanup_response = client.responses.create(
             model="gpt-4.1-mini",
             input=[
                 {
                     "role": "system",
                     "content": """
-You are a transcription cleanup assistant for business meetings.
+You clean business meeting transcripts.
 
 Rules:
-- Preserve the original languages exactly as spoken.
-- If a phrase was spoken in Hebrew, keep it in Hebrew.
-- If a phrase was spoken in English, keep it in English.
-- Do NOT translate.
-- Fix punctuation.
-- Fix spacing.
-- Remove obvious duplicate fragments caused by transcription glitches.
-- Keep the meaning exactly the same.
-- Return only the cleaned transcript text, with no intro and no explanation.
+- Preserve the original spoken languages exactly.
+- Keep Hebrew in Hebrew.
+- Keep English in English.
+- Do not translate.
+- Improve punctuation and spacing.
+- Remove obvious duplicated fragments if they are clearly accidental.
+- Format the transcript into readable sentences and short paragraphs.
+- Do not add content that was not spoken.
+- Do not summarize.
+- Return only the cleaned transcript text.
 """
                 },
                 {
