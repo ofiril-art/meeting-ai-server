@@ -7,26 +7,37 @@ app = Flask(__name__)
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-@app.route("/")
+
+@app.route("/", methods=["GET"])
 def home():
     return jsonify({"status": "ok"})
 
+
 @app.route("/transcribe", methods=["POST"])
 def transcribe():
+    temp_path = None
+
     try:
         if "file" not in request.files:
-            return jsonify({"error": "No file uploaded"})
+            return jsonify({"error": "No file uploaded"}), 400
 
-        audio_file = request.files["file"]
+        uploaded_file = request.files["file"]
 
-        with tempfile.NamedTemporaryFile(delete=False) as tmp:
-            audio_file.save(tmp.name)
+        if uploaded_file.filename == "":
+            return jsonify({"error": "Empty filename"}), 400
 
-            with open(tmp.name, "rb") as f:
-                transcription = client.audio.transcriptions.create(
-                    model="gpt-4o-transcribe",
-                    file=f
-                )
+        # חשוב מאוד: לשמור עם אותה סיומת שהגיעה מהאפליקציה
+        suffix = os.path.splitext(uploaded_file.filename)[1] or ".m4a"
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_file:
+            uploaded_file.save(temp_file.name)
+            temp_path = temp_file.name
+
+        with open(temp_path, "rb") as audio_file:
+            transcription = client.audio.transcriptions.create(
+                model="gpt-4o-mini-transcribe",
+                file=audio_file
+            )
 
         return jsonify({
             "text": transcription.text
@@ -35,7 +46,13 @@ def transcribe():
     except Exception as e:
         return jsonify({
             "error": str(e)
-        })
+        }), 500
+
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            os.remove(temp_path)
+
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8080)
+    port = int(os.getenv("PORT", 8080))
+    app.run(host="0.0.0.0", port=port)
