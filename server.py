@@ -112,9 +112,10 @@ This is a business meeting that may include Hebrew and English.
 
 Rules:
 - Keep Hebrew in Hebrew.
-- Keep English in English.
-- Do NOT translate between languages.
-- Preserve the exact spoken words as much as possible.
+- Keep English EXACTLY as spoken (do not translate English words).
+- If a word was spoken in English, keep it in English.
+- Do NOT replace English terms with Hebrew equivalents.
+- Preserve natural sentence flow.
 - Keep mixed-language sentences intact.
 """
             )
