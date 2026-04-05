@@ -10,27 +10,14 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 
 def basic_cleanup(text: str) -> str:
-    """
-    ניקוי טכני בלבד.
-    חשוב: לא משנה שפה, לא מתרגם, לא משכתב.
-    """
     if not text:
         return ""
 
     result = text.strip()
-
-    # רווחים כפולים
     result = re.sub(r"[ \t]+", " ", result)
-
-    # רווחים לפני סימני פיסוק
     result = re.sub(r"\s+([,.;:!?])", r"\1", result)
-
-    # רווחים אחרי סימני פיסוק אם חסר
     result = re.sub(r"([,.;:!?])([^\s])", r"\1 \2", result)
-
-    # ניקוי שורות ריקות כפולות
     result = re.sub(r"\n{3,}", "\n\n", result)
-
     return result.strip()
 
 
@@ -72,9 +59,53 @@ Rules:
         raw_text = (transcription.text or "").strip()
         cleaned_text = basic_cleanup(raw_text)
 
+        summary_response = client.responses.create(
+            model="gpt-4.1-mini",
+            input=[
+                {
+                    "role": "system",
+                    "content": """
+You create concise meeting summaries from transcripts.
+
+Rules:
+- Respond in Hebrew.
+- Keep English technical terms in English when they appeared that way in the transcript.
+- Do not invent facts.
+- If something is unclear, omit it.
+- Return valid JSON only with this exact structure:
+{
+  "summary": "short paragraph",
+  "action_items": ["item 1", "item 2"]
+}
+- summary must be 2-4 sentences.
+- action_items should contain only concrete next steps, and can be empty.
+"""
+                },
+                {
+                    "role": "user",
+                    "content": cleaned_text
+                }
+            ]
+        )
+
+        summary_text = ""
+        action_items = []
+
+        try:
+            parsed = json_from_text(summary_response.output_text)
+            summary_text = parsed.get("summary", "") if isinstance(parsed, dict) else ""
+            action_items = parsed.get("action_items", []) if isinstance(parsed, dict) else []
+            if not isinstance(action_items, list):
+                action_items = []
+        except Exception:
+            summary_text = ""
+            action_items = []
+
         return jsonify({
             "raw_text": raw_text,
-            "text": cleaned_text
+            "text": cleaned_text,
+            "summary": summary_text,
+            "action_items": action_items
         })
 
     except Exception as e:
@@ -85,6 +116,25 @@ Rules:
     finally:
         if temp_path and os.path.exists(temp_path):
             os.remove(temp_path)
+
+
+def json_from_text(text: str):
+    import json
+
+    text = (text or "").strip()
+
+    try:
+        return json.loads(text)
+    except Exception:
+        pass
+
+    start = text.find("{")
+    end = text.rfind("}")
+
+    if start != -1 and end != -1 and end > start:
+        return json.loads(text[start:end + 1])
+
+    raise ValueError("No valid JSON found")
 
 
 @app.route("/", methods=["GET"])
