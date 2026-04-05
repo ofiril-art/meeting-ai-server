@@ -22,10 +22,25 @@ def basic_cleanup(text: str) -> str:
     return result.strip()
 
 
+def fix_mixed_text(text: str) -> str:
+    """
+    ניקוי עדין לטקסט משולב עברית/אנגלית:
+    - מוסיף רווחים כשעברית ואנגלית נצמדות
+    - לא מתרגם
+    - לא משנה סדר מילים
+    """
+    if not text:
+        return ""
+
+    text = re.sub(r"([א-ת])([A-Za-z])", r"\1 \2", text)
+    text = re.sub(r"([A-Za-z])([א-ת])", r"\1 \2", text)
+    text = re.sub(r"\s{2,}", " ", text)
+    return text.strip()
+
+
 def add_readable_paragraphs(text: str) -> str:
     """
-    שיפור קטן עם אפקט גדול:
-    הופך את התמלול לפסקאות קריאות בלי לשנות תוכן ובלי לתרגם.
+    מחלק לפסקאות קריאות יותר בלי לשנות תוכן.
     """
     if not text:
         return ""
@@ -39,7 +54,7 @@ def add_readable_paragraphs(text: str) -> str:
     paragraphs = []
     current = []
 
-    for i, sentence in enumerate(sentences, start=1):
+    for sentence in sentences:
         current.append(sentence)
 
         if len(current) >= 2:
@@ -106,6 +121,7 @@ Rules:
 
         raw_text = (transcription.text or "").strip()
         cleaned_text = basic_cleanup(raw_text)
+        cleaned_text = fix_mixed_text(cleaned_text)
         formatted_text = add_readable_paragraphs(cleaned_text)
 
         summary_response = client.responses.create(
