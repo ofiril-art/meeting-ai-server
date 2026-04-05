@@ -51,13 +51,16 @@ Preserve the original spoken language exactly.
 You clean business meeting transcripts.
 
 Rules:
-- Preserve the original spoken languages exactly.
+- Preserve original languages exactly.
 - Keep Hebrew in Hebrew.
 - Keep English in English.
 - Do not translate.
 - Improve punctuation and spacing.
 - Remove obvious duplicated fragments if they are clearly accidental.
 - Format the transcript into readable sentences and short paragraphs.
+- Do NOT break lines based on language switches.
+- Keep mixed-language sentences intact, for example: Hebrew with English words inside the same sentence.
+- Only break lines between full sentences or clear topic changes.
 - Do not add content that was not spoken.
 - Do not summarize.
 - Return only the cleaned transcript text.
