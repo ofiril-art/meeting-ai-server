@@ -26,7 +26,6 @@ def transcribe():
         if uploaded_file.filename == "":
             return jsonify({"error": "Empty filename"}), 400
 
-        # חשוב מאוד: לשמור עם אותה סיומת שהגיעה מהאפליקציה
         suffix = os.path.splitext(uploaded_file.filename)[1] or ".m4a"
 
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_file:
@@ -36,7 +35,9 @@ def transcribe():
         with open(temp_path, "rb") as audio_file:
             transcription = client.audio.transcriptions.create(
                 model="gpt-4o-mini-transcribe",
-                file=audio_file
+                file=audio_file,
+                # 👇 זה הקסם
+                language="he"
             )
 
         return jsonify({
