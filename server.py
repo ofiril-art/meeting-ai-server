@@ -8,6 +8,63 @@ app = Flask(__name__)
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 
+def fix_bidirectional_text(text: str) -> str:
+    """
+    מוסיף סימני כיווניות כדי שטקסט משולב עברית/אנגלית
+    יוצג בצורה יציבה יותר באפליקציות כמו Notes / iOS / macOS.
+    """
+    LTR = "\u200E"
+    RTL = "\u200F"
+
+    result = []
+    current = ""
+    current_mode = None  # "he" / "non-he"
+
+    def char_mode(ch: str) -> str:
+        if "\u0590" <= ch <= "\u05FF":
+            return "he"
+        return "non-he"
+
+    for ch in text:
+        # שומרים רווחים וסימני ירידת שורה כחלק מהקטע הנוכחי
+        if ch == "\n":
+            if current:
+                if current_mode == "he":
+                    result.append(RTL + current + RTL)
+                else:
+                    result.append(LTR + current + LTR)
+                current = ""
+                current_mode = None
+            result.append("\n")
+            continue
+
+        mode = char_mode(ch)
+
+        if current_mode is None:
+            current_mode = mode
+            current = ch
+            continue
+
+        if mode == current_mode:
+            current += ch
+        else:
+            if current_mode == "he":
+                result.append(RTL + current + RTL)
+            else:
+                result.append(LTR + current + LTR)
+
+            current = ch
+            current_mode = mode
+
+    if current:
+        if current_mode == "he":
+            result.append(RTL + current + RTL)
+        else:
+            result.append(LTR + current + LTR)
+
+    return "".join(result)
+
+
 @app.route("/transcribe", methods=["POST"])
 def transcribe():
     temp_path = None
@@ -73,7 +130,8 @@ Rules:
             ]
         )
 
-        cleaned_text = cleanup_response.output_text.strip()
+        cleaned_text = (cleanup_response.output_text or "").strip()
+        cleaned_text = fix_bidirectional_text(cleaned_text)
 
         return jsonify({
             "raw_text": raw_text,
