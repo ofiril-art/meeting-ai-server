@@ -253,6 +253,74 @@ Rules:
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+        
+        @app.route("/generate-email-summary", methods=["POST"])
+def generate_email_summary():
+    try:
+        data = request.get_json()
+
+        transcript = data.get("transcript", "")
+        summary = data.get("summary", "")
+        action_items = data.get("action_items", [])
+        meeting_name = data.get("meeting_name", "")
+        meeting_date = data.get("meeting_date", "")
+
+        prompt = f"""
+You generate a professional meeting summary email in Hebrew.
+
+Rules:
+- Write in Hebrew
+- Keep English terms if they appeared that way
+- Tone: professional, clear, human-like
+- Do NOT invent details
+- Use the structure exactly as requested
+
+Return ONLY JSON in this format:
+{{
+  "subject": "...",
+  "body": "..."
+}}
+
+Structure:
+
+Subject:
+סיכום פגישה – {meeting_name} – {meeting_date}
+
+Body:
+שלום רב,
+
+בתאריך {meeting_date} התקיימה פגישה בנושא {meeting_name}.
+
+מטרת הפגישה הייתה:
+{summary}
+
+עיקרי הדברים שנדונו:
+(Use 3-6 bullet points based on transcript/summary)
+
+משימות להמשך:
+(List from action_items)
+
+סיום:
+תודה לכולם.
+"""
+
+        response = client.responses.create(
+            model="gpt-4.1-mini",
+            input=[
+                {"role": "system", "content": "You generate structured meeting emails."},
+                {"role": "user", "content": prompt}
+            ]
+        )
+
+        parsed = json_from_text(response.output_text)
+
+        return jsonify({
+            "subject": parsed.get("subject", ""),
+            "body": parsed.get("body", "")
+        })
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route("/", methods=["GET"])
 def home():
