@@ -184,6 +184,75 @@ Rules:
         if temp_path and os.path.exists(temp_path):
             os.remove(temp_path)
 
+@app.route("/regenerate-summary", methods=["POST"])
+def regenerate_summary():
+    try:
+        data = request.get_json(silent=True) or {}
+
+        transcript = (data.get("transcript") or "").strip()
+        attachments = data.get("attachments") or []
+
+        if not transcript:
+            return jsonify({"error": "Missing transcript"}), 400
+
+        attachment_lines = []
+        for item in attachments:
+            if isinstance(item, dict):
+                file_name = (item.get("fileName") or "").strip()
+                file_type = (item.get("fileType") or "").strip()
+
+                if file_name or file_type:
+                    attachment_lines.append(f"- {file_name} ({file_type})")
+
+        attachment_text = "\n".join(attachment_lines).strip()
+        user_content = transcript
+
+        if attachment_text:
+            user_content += "\n\nAttachments:\n" + attachment_text
+
+        response = client.responses.create(
+            model="gpt-4.1-mini",
+            input=[
+                {
+                    "role": "system",
+                    "content": """
+You create improved meeting summaries using the transcript and any attached files metadata.
+
+Rules:
+- Respond in Hebrew.
+- Keep English technical terms in English if they are part of the meeting domain.
+- Do not invent facts from attachments you did not actually read.
+- If only attachment file names/types are available, use them only as context hints.
+- Return valid JSON only with this exact structure:
+{
+  "summary": "short paragraph",
+  "action_items": ["item 1", "item 2"]
+}
+- summary must be 2-4 sentences.
+- action_items should contain only concrete next steps, and can be empty.
+"""
+                },
+                {
+                    "role": "user",
+                    "content": user_content
+                }
+            ]
+        )
+
+        parsed = json_from_text(response.output_text)
+        summary_text = parsed.get("summary", "") if isinstance(parsed, dict) else ""
+        action_items = parsed.get("action_items", []) if isinstance(parsed, dict) else []
+
+        if not isinstance(action_items, list):
+            action_items = []
+
+        return jsonify({
+            "summary": summary_text,
+            "action_items": action_items
+        })
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route("/", methods=["GET"])
 def home():
