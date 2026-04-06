@@ -167,9 +167,7 @@ Rules:
         })
 
     except Exception as e:
-        return jsonify({
-            "error": str(e)
-        }), 500
+        return jsonify({"error": str(e)}), 500
 
     finally:
         if temp_path and os.path.exists(temp_path):
