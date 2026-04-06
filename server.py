@@ -23,12 +23,6 @@ def basic_cleanup(text: str) -> str:
 
 
 def fix_mixed_text(text: str) -> str:
-    """
-    ניקוי עדין לטקסט משולב עברית/אנגלית:
-    - מוסיף רווחים כשעברית ואנגלית נצמדות
-    - לא מתרגם
-    - לא משנה סדר מילים
-    """
     if not text:
         return ""
 
@@ -39,9 +33,6 @@ def fix_mixed_text(text: str) -> str:
 
 
 def add_readable_paragraphs(text: str) -> str:
-    """
-    מחלק לפסקאות קריאות יותר בלי לשנות תוכן.
-    """
     if not text:
         return ""
 
@@ -184,6 +175,7 @@ Rules:
         if temp_path and os.path.exists(temp_path):
             os.remove(temp_path)
 
+
 @app.route("/regenerate-summary", methods=["POST"])
 def regenerate_summary():
     try:
@@ -253,11 +245,12 @@ Rules:
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-        
-        @app.route("/generate-email-summary", methods=["POST"])
+
+
+@app.route("/generate-email-summary", methods=["POST"])
 def generate_email_summary():
     try:
-        data = request.get_json()
+        data = request.get_json(silent=True) or {}
 
         transcript = data.get("transcript", "")
         summary = data.get("summary", "")
@@ -269,24 +262,23 @@ def generate_email_summary():
 You generate a professional meeting summary email in Hebrew.
 
 Rules:
-- Write in Hebrew
-- Keep English terms if they appeared that way
-- Tone: professional, clear, human-like
-- Do NOT invent details
-- Use the structure exactly as requested
+- Write in Hebrew.
+- Keep English terms if they appeared that way.
+- Tone: professional, clear, human-like.
+- Do not invent details.
+- Use the exact structure requested.
+- Return ONLY valid JSON.
 
-Return ONLY JSON in this format:
+Return JSON in this format:
 {{
   "subject": "...",
   "body": "..."
 }}
 
-Structure:
-
-Subject:
+Subject format:
 סיכום פגישה – {meeting_name} – {meeting_date}
 
-Body:
+Body format:
 שלום רב,
 
 בתאריך {meeting_date} התקיימה פגישה בנושא {meeting_name}.
@@ -295,20 +287,25 @@ Body:
 {summary}
 
 עיקרי הדברים שנדונו:
-(Use 3-6 bullet points based on transcript/summary)
+(Use 3-6 concise bullet points based on transcript and summary)
 
 משימות להמשך:
-(List from action_items)
+(Use the provided action_items)
 
-סיום:
 תודה לכולם.
 """
 
         response = client.responses.create(
             model="gpt-4.1-mini",
             input=[
-                {"role": "system", "content": "You generate structured meeting emails."},
-                {"role": "user", "content": prompt}
+                {
+                    "role": "system",
+                    "content": "You generate structured professional meeting summary emails in Hebrew."
+                },
+                {
+                    "role": "user",
+                    "content": prompt
+                }
             ]
         )
 
@@ -321,6 +318,7 @@ Body:
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
 
 @app.route("/", methods=["GET"])
 def home():
