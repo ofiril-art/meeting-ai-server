@@ -341,9 +341,21 @@ def extract_date():
             model="gpt-4o-mini",
             messages=[
                 {
-                    "role": "system",
-                    "content": "Extract a due date from the task. Return only a date in ISO format (YYYY-MM-DD) or null if none. Today is " + datetime.now().strftime("%Y-%m-%d")
-                },
+    "role": "system",
+    "content": f"""
+You extract a due date from a task.
+
+Rules:
+- If the task contains a relative date (like tomorrow, next week, Sunday), convert it to an exact date.
+- Assume "Sunday" means the upcoming Sunday.
+- Today is {datetime.now().strftime("%Y-%m-%d")}
+
+Return ONLY:
+- a date in format YYYY-MM-DD
+OR
+- null
+"""
+},
                 {
                     "role": "user",
                     "content": text
