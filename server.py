@@ -326,3 +326,38 @@ def home():
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+    
+    
+from datetime import datetime
+from flask import request, jsonify
+
+@app.route("/extract-date", methods=["POST"])
+def extract_date():
+    data = request.get_json()
+    text = data.get("text", "")
+
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {
+                    "role": "system",
+                    "content": "Extract a due date from the task. Return only a date in ISO format (YYYY-MM-DD) or null if none. Today is " + datetime.now().strftime("%Y-%m-%d")
+                },
+                {
+                    "role": "user",
+                    "content": text
+                }
+            ]
+        )
+
+        result = response.choices[0].message.content.strip()
+
+        if result.lower() == "null":
+            return jsonify({"date": None})
+
+        return jsonify({"date": result})
+
+    except Exception as e:
+        print("❌ extract_date error:", e)
+        return jsonify({"date": None})
