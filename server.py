@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta
 from flask import Flask, request, jsonify
 import os
 import re
@@ -334,28 +335,52 @@ from flask import request, jsonify
 @app.route("/extract-date", methods=["POST"])
 def extract_date():
     data = request.get_json()
-    text = data.get("text", "")
+    text = (data.get("text", "") or "").strip()
+
+    today = datetime.now().date()
+
+    def next_weekday_date(target_weekday: int):
+        days_ahead = (target_weekday - today.weekday()) % 7
+        if days_ahead == 0:
+            days_ahead = 7
+        return today + timedelta(days=days_ahead)
 
     try:
+        weekday_map = {
+            "יום ראשון": 6,
+            "יום שני": 0,
+            "יום שלישי": 1,
+            "יום רביעי": 2,
+            "יום חמישי": 3,
+            "יום שישי": 4,
+            "יום שבת": 5,
+        }
+
+        for phrase, weekday in weekday_map.items():
+            if phrase in text:
+                found_date = next_weekday_date(weekday)
+                return jsonify({"date": found_date.strftime("%Y-%m-%d")})
+
+        if "מחר" in text:
+            return jsonify({"date": (today + timedelta(days=1)).strftime("%Y-%m-%d")})
+
+        if "שבוע הבא" in text:
+            return jsonify({"date": (today + timedelta(days=7)).strftime("%Y-%m-%d")})
+
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
                 {
-    "role": "system",
-    "content": f"""
-You extract a due date from a task.
+                    "role": "system",
+                    "content": f"""
+Extract a due date from a task.
 
-Rules:
-- If the task contains a relative date (like tomorrow, next week, Sunday), convert it to an exact date.
-- Assume "Sunday" means the upcoming Sunday.
-- Today is {datetime.now().strftime("%Y-%m-%d")}
+Today is {today.strftime("%Y-%m-%d")}
 
 Return ONLY:
-- a date in format YYYY-MM-DD
-OR
-- null
+YYYY-MM-DD or null
 """
-},
+                },
                 {
                     "role": "user",
                     "content": text
