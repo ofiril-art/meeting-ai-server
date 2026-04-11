@@ -357,11 +357,11 @@ def generate_email_summary():
 
         style_instruction = ""
         if email_style == "קצר":
-            style_instruction = "Keep the email extremely concise. Maximum 3-4 sentences total."
+            style_instruction = "Keep the email extremely concise. Maximum 3-4 sentences total. No bullets. Prioritize only the single most important points."
         elif email_style == "ניהולי":
-            style_instruction = "Focus strictly on decisions, risks, and action items. Remove all fluff."
+            style_instruction = "Write like a senior executive summary. Focus on decisions, risks, and next steps. Use bullet points. Remove all fluff."
         elif email_style == "ידידותי":
-            style_instruction = "Use a warm, conversational tone as if writing to a colleague."
+            style_instruction = "Write like a colleague sending a casual follow-up. Use a more natural, flowing tone and less formal structure."
         else:
             style_instruction = "Use a clear, structured, professional tone."
 
@@ -408,10 +408,16 @@ Subject requirements:
 Body requirements:
 - Start with: שלום רב,
 - Then one short opening sentence about the meeting
-- Then ONLY the key insights (2-4 bullets max)
+- Then ONLY the key insights that truly matter
 - Then a short section for follow-up tasks if there are action items
 - End naturally and professionally
 - Keep it concise and useful
+- Each email style must feel clearly different in structure, tone, and length.
+- Avoid generating similar outputs across styles.
+- For "קצר": no bullets, maximum 3-4 short sentences total.
+- For "ניהולי": use bullets and emphasize decisions, risks, and next steps.
+- For "ידידותי": prefer a more natural flowing structure and warmer wording.
+- For "מקצועי": keep a balanced formal structure.
 - Do not mention "attachments", "links", "scraped content", or "website content" unless absolutely necessary for understanding the meeting
 """
 
