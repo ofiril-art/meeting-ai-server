@@ -357,13 +357,13 @@ def generate_email_summary():
 
         style_instruction = ""
         if email_style == "קצר":
-            style_instruction = "Keep the email very concise and to the point."
+            style_instruction = "Keep the email extremely concise. Maximum 3-4 sentences total."
         elif email_style == "ניהולי":
-            style_instruction = "Focus on decisions, business impact, and action items."
+            style_instruction = "Focus strictly on decisions, risks, and action items. Remove all fluff."
         elif email_style == "ידידותי":
-            style_instruction = "Use a slightly warmer and more friendly tone."
+            style_instruction = "Use a warm, conversational tone as if writing to a colleague."
         else:
-            style_instruction = "Use a professional and balanced tone."
+            style_instruction = "Use a clear, structured, professional tone."
 
         prompt = f"""
 You generate a professional meeting summary email in Hebrew.
@@ -374,6 +374,9 @@ Rules:
 - Tone: adapt to the requested style.
 - Style instruction: {style_instruction}
 - Do not invent details.
+- First decide what are the 2-4 MOST important insights from the meeting.
+- Prioritize decisions, risks, and next steps over general discussion.
+- Do not include everything — include only what matters.
 - Use attachments and link content only as background context.
 - Do NOT paste raw website text, raw scraped content, long quotes, or lists of site sections into the email.
 - Only include information from links if it is clearly relevant to the actual meeting discussion.
@@ -405,7 +408,7 @@ Subject requirements:
 Body requirements:
 - Start with: שלום רב,
 - Then one short opening sentence about the meeting
-- Then a short paragraph or bullets with the main discussion points
+- Then ONLY the key insights (2-4 bullets max)
 - Then a short section for follow-up tasks if there are action items
 - End naturally and professionally
 - Keep it concise and useful
