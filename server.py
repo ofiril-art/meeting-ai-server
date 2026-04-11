@@ -257,6 +257,23 @@ def generate_email_summary():
         meeting_name = data.get("meeting_name", "")
         meeting_date = data.get("meeting_date", "")
 
+        attachments = data.get("attachments", [])
+
+        attachment_lines = []
+        for item in attachments:
+            if isinstance(item, dict):
+                file_name = (item.get("file_name") or "").strip()
+                file_type = (item.get("file_type") or "").strip()
+
+                if file_name or file_type:
+                    attachment_lines.append(f"- {file_name} ({file_type})")
+
+        attachment_text = "\n".join(attachment_lines).strip()
+
+        attachments_section = ""
+        if attachment_text:
+            attachments_section = f"\nקבצים וקישורים שקשורים לפגישה:\n{attachment_text}\n"
+
         prompt = f"""
 You generate a professional meeting summary email in Hebrew.
 
@@ -284,7 +301,7 @@ Body format:
 
 מטרת הפגישה הייתה:
 {summary}
-
+{attachments_section}
 עיקרי הדברים שנדונו:
 (Use 3-6 concise bullet points based on transcript and summary)
 
