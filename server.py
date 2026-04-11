@@ -290,6 +290,8 @@ Rules:
 }
 - summary must be 2-4 sentences.
 - action_items should contain only concrete next steps, and can be empty.
+- If the output language is English, keep summary and action items in natural professional English.
+- If the output language is Hebrew, keep summary and action items in natural professional Hebrew.
 """
                 },
                 {
@@ -422,21 +424,30 @@ Return JSON in this exact format:
 }}
 
 Subject requirements:
-- Hebrew
-- Professional
-- Based on the meeting name and date
+- Match the output language to meeting_language.
+- Professional.
+- Based on the meeting name and date.
 - Adapt to audience:
-  - For "לקוח": more formal and external-facing
-  - For "הנהלה": concise and executive-style
-  - For "צוות פנימי": more direct and practical
+  - For "לקוח": more formal and external-facing.
+  - For "הנהלה": concise and executive-style.
+  - For "צוות פנימי": more direct and practical.
 
 Body requirements:
-- Start with: שלום רב,
-- Then one short opening sentence about the meeting
-- Then ONLY the key insights that truly matter
-- Then a short section for follow-up tasks if there are action items
-- End naturally and professionally
-- Keep it concise and useful
+- Greeting rules:
+  - If meeting_language is "אנגלית" → start with "Hello,".
+  - If meeting_language is "עברית" → start with "שלום רב,".
+  - If meeting_language is "אוטומטי" → detect from transcript and choose accordingly.
+- Match the greeting tone to the audience:
+  - For "לקוח": slightly more formal.
+  - For "צוות פנימי": can be a bit lighter.
+- Then one short opening sentence about the meeting.
+- Then ONLY the key insights that truly matter.
+- Then a short section for follow-up tasks if there are action items.
+- Closing rules:
+  - If meeting_language is "אנגלית" → end naturally in English, for example "Best regards," or another natural professional ending.
+  - If meeting_language is "עברית" → end naturally in Hebrew, for example "בברכה," or another natural professional ending.
+  - If meeting_language is "אוטומטי" → detect from transcript and choose accordingly.
+- Keep it concise and useful.
 - Each email style must feel clearly different in structure, tone, and length.
 - Avoid generating similar outputs across styles.
 - For "קצר": no bullets, maximum 3-4 short sentences total.
@@ -444,7 +455,7 @@ Body requirements:
 - For "ידידותי": prefer a more natural flowing structure and warmer wording.
 - For "מקצועי": keep a balanced formal structure.
 - For "לקוח": avoid internal operational details and present the meeting as a clear external-facing summary.
-- Do not mention "attachments", "links", "scraped content", or "website content" unless absolutely necessary for understanding the meeting
+- Do not mention "attachments", "links", "scraped content", or "website content" unless absolutely necessary for understanding the meeting.
 """
 
         response = client.responses.create(
@@ -452,7 +463,7 @@ Body requirements:
             input=[
                 {
                     "role": "system",
-                    "content": "You generate structured professional meeting summary emails in Hebrew."
+                    "content": "You generate structured professional meeting summary emails that strictly follow the requested language, audience, and style."
                 },
                 {
                     "role": "user",
