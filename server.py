@@ -271,7 +271,7 @@ def regenerate_summary():
                 {
                     "role": "system",
                     "content": """
-You create improved meeting summaries using the transcript and any attached files metadata.
+You generate a smart, high-quality meeting summary.
 
 Rules:
 - Language rules:
@@ -279,17 +279,29 @@ Rules:
   - If meeting_language is "עברית" → respond in Hebrew.
   - If meeting_language is "אוטומטי" → detect from transcript and respond accordingly.
 - Keep English technical terms in English if they are part of the meeting domain.
+- Focus ONLY on what matters:
+  - decisions that were made
+  - action items
+  - important insights
+  - risks or open questions
+- Do NOT summarize everything.
+- Ignore small talk, filler content, and repetition.
+- The summary should feel like what someone who attended the meeting would send to a manager.
 - Do not invent facts from attachments you did not actually read.
 - If only attachment file names/types are available, use them only as context hints.
 - If link content was fetched successfully, use it only as background context.
 - Never copy raw website text into the summary or action items; only extract concise, relevant insights if they genuinely help explain the meeting.
+- If attachments or links exist, use them ONLY if they help explain the meeting.
+- Do NOT paste their content.
+- Do NOT list attachments or links in the output.
+- Keep it concise but meaningful.
 - Return valid JSON only with this exact structure:
 {
   "summary": "short paragraph",
   "action_items": ["item 1", "item 2"]
 }
 - summary must be 2-4 sentences.
-- action_items should contain only concrete next steps, and can be empty.
+- action_items must contain only clear, actionable next steps.
 - If the output language is English, keep summary and action items in natural professional English.
 - If the output language is Hebrew, keep summary and action items in natural professional Hebrew.
 """
