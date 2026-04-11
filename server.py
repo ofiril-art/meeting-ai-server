@@ -4,6 +4,8 @@ import os
 import re
 import json
 import tempfile
+import requests
+from bs4 import BeautifulSoup
 from openai import OpenAI
 
 app = Flask(__name__)
@@ -74,6 +76,53 @@ def json_from_text(text: str):
         return json.loads(text[start:end + 1])
 
     raise ValueError("No valid JSON found")
+
+
+# Helper to fetch text from a link, for link attachments
+def fetch_link_text(url: str, max_chars: int = 4000) -> str:
+    url = (url or "").strip()
+    if not url:
+        return ""
+
+    if not url.lower().startswith(("http://", "https://")):
+        url = f"https://{url}"
+
+    try:
+        response = requests.get(
+            url,
+            timeout=10,
+            headers={
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+            }
+        )
+        response.raise_for_status()
+
+        soup = BeautifulSoup(response.text, "html.parser")
+
+        for tag in soup(["script", "style", "noscript"]):
+            tag.decompose()
+
+        title = ""
+        if soup.title and soup.title.string:
+            title = soup.title.string.strip()
+
+        text = soup.get_text("\n", strip=True)
+        text = re.sub(r"\n{2,}", "\n", text)
+        text = text.strip()
+
+        if not text and not title:
+            return ""
+
+        combined = ""
+        if title:
+            combined += f"Title: {title}\n"
+        if text:
+            combined += text
+
+        return combined[:max_chars].strip()
+    except Exception as e:
+        print(f"❌ Failed fetching link content from {url}: {e}", flush=True)
+        return ""
 
 
 @app.route("/transcribe", methods=["POST"])
@@ -262,6 +311,8 @@ def generate_email_summary():
         print("📎 Email attachments count:", len(attachments), flush=True)
 
         attachment_lines = []
+        link_context_blocks = []
+
         for item in attachments:
             if isinstance(item, dict):
                 file_name = (item.get("file_name") or "").strip()
@@ -270,11 +321,23 @@ def generate_email_summary():
                 if file_name or file_type:
                     attachment_lines.append(f"- {file_name} ({file_type})")
 
+                if file_type.lower() == "link" and file_name:
+                    link_text = fetch_link_text(file_name)
+                    if link_text:
+                        link_context_blocks.append(
+                            f"קישור: {file_name}\nתוכן מהקישור:\n{link_text}"
+                        )
+
         attachment_text = "\n".join(attachment_lines).strip()
+        links_context_text = "\n\n".join(link_context_blocks).strip()
 
         attachments_section = ""
         if attachment_text:
             attachments_section = f"\nקבצים וקישורים שקשורים לפגישה:\n{attachment_text}\n"
+
+        links_content_section = ""
+        if links_context_text:
+            links_content_section = f"\nתוכן שנשלף מהקישורים:\n{links_context_text}\n"
 
         prompt = f"""
 You generate a professional meeting summary email in Hebrew.
@@ -304,6 +367,7 @@ Body format:
 מטרת הפגישה הייתה:
 {summary}
 {attachments_section}
+{links_content_section}
 עיקרי הדברים שנדונו:
 (Use 3-6 concise bullet points based on transcript and summary)
 
