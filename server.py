@@ -320,6 +320,9 @@ def generate_email_summary():
         meeting_name = data.get("meeting_name", "")
         meeting_date = data.get("meeting_date", "")
 
+        email_style = (data.get("email_style") or "מקצועי").strip()
+        print("✉️ Email style received:", email_style, flush=True)
+
         attachments = data.get("attachments", [])
         print("📎 Email attachments received:", attachments, flush=True)
         print("📎 Email attachments count:", len(attachments), flush=True)
@@ -353,13 +356,24 @@ def generate_email_summary():
         if links_context_text:
             links_content_section = f"\nתוכן שנשלף מהקישורים:\n{links_context_text}\n"
 
+        style_instruction = ""
+        if email_style == "קצר":
+            style_instruction = "Keep the email very concise and to the point."
+        elif email_style == "ניהולי":
+            style_instruction = "Focus on decisions, business impact, and action items."
+        elif email_style == "ידידותי":
+            style_instruction = "Use a slightly warmer and more friendly tone."
+        else:
+            style_instruction = "Use a professional and balanced tone."
+
         prompt = f"""
 You generate a professional meeting summary email in Hebrew.
 
 Rules:
 - Write in Hebrew.
 - Keep English terms if they appeared that way.
-- Tone: professional, clear, human-like.
+- Tone: adapt to the requested style.
+- Style instruction: {style_instruction}
 - Do not invent details.
 - Use the exact structure requested.
 - Return ONLY valid JSON.
