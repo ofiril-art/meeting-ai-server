@@ -261,7 +261,7 @@ def regenerate_summary():
             user_content += "\n\nAttachments:\n" + attachment_text
 
         if links_context_text:
-            user_content += "\n\nLink content:\n" + links_context_text
+            user_content += "\n\nBackground context from related links (use only if relevant, never copy verbatim):\n" + links_context_text
 
         response = client.responses.create(
             model="gpt-4.1-mini",
@@ -276,7 +276,8 @@ Rules:
 - Keep English technical terms in English if they are part of the meeting domain.
 - Do not invent facts from attachments you did not actually read.
 - If only attachment file names/types are available, use them only as context hints.
-- If link content was fetched successfully, use it as additional factual context for the summary and action items.
+- If link content was fetched successfully, use it only as background context.
+- Never copy raw website text into the summary or action items; only extract concise, relevant insights if they genuinely help explain the meeting.
 - Return valid JSON only with this exact structure:
 {
   "summary": "short paragraph",
@@ -348,13 +349,11 @@ def generate_email_summary():
         attachment_text = "\n".join(attachment_lines).strip()
         links_context_text = "\n\n".join(link_context_blocks).strip()
 
-        attachments_section = ""
+        hidden_context_section = ""
         if attachment_text:
-            attachments_section = f"\nקבצים וקישורים שקשורים לפגישה:\n{attachment_text}\n"
-
-        links_content_section = ""
+            hidden_context_section += f"\nAttachments related to the meeting:\n{attachment_text}\n"
         if links_context_text:
-            links_content_section = f"\nתוכן שנשלף מהקישורים:\n{links_context_text}\n"
+            hidden_context_section += f"\nLink context extracted from related websites:\n{links_context_text}\n"
 
         style_instruction = ""
         if email_style == "קצר":
@@ -375,34 +374,42 @@ Rules:
 - Tone: adapt to the requested style.
 - Style instruction: {style_instruction}
 - Do not invent details.
-- Use the exact structure requested.
+- Use attachments and link content only as background context.
+- Do NOT paste raw website text, raw scraped content, long quotes, or lists of site sections into the email.
+- Only include information from links if it is clearly relevant to the actual meeting discussion.
+- If the links add no real value to the meeting itself, ignore them.
+- The final email must read naturally, like a human wrote it after attending the meeting.
 - Return ONLY valid JSON.
 
-Return JSON in this format:
+Hidden meeting context:
+Meeting name: {meeting_name}
+Meeting date: {meeting_date}
+Summary of the meeting: {summary}
+Transcript:
+{transcript}
+Action items:
+{json.dumps(action_items, ensure_ascii=False)}
+{hidden_context_section}
+
+Return JSON in this exact format:
 {{
   "subject": "...",
   "body": "..."
 }}
 
-Subject format:
-סיכום פגישה – {meeting_name} – {meeting_date}
+Subject requirements:
+- Hebrew
+- Professional
+- Based on the meeting name and date
 
-Body format:
-שלום רב,
-
-בתאריך {meeting_date} התקיימה פגישה בנושא {meeting_name}.
-
-מטרת הפגישה הייתה:
-{summary}
-{attachments_section}
-{links_content_section}
-עיקרי הדברים שנדונו:
-(Use 3-6 concise bullet points based on transcript and summary)
-
-משימות להמשך:
-(Use the provided action_items)
-
-תודה לכולם.
+Body requirements:
+- Start with: שלום רב,
+- Then one short opening sentence about the meeting
+- Then a short paragraph or bullets with the main discussion points
+- Then a short section for follow-up tasks if there are action items
+- End naturally and professionally
+- Keep it concise and useful
+- Do not mention "attachments", "links", "scraped content", or "website content" unless absolutely necessary for understanding the meeting
 """
 
         response = client.responses.create(
