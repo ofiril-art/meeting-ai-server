@@ -371,7 +371,7 @@ def generate_email_summary():
         if email_audience == "הנהלה":
             audience_instruction = "Write for senior management. Emphasize business impact, decisions, risks, and next steps."
         elif email_audience == "לקוח":
-            audience_instruction = "Write for an external client. Keep the tone polished, representative, and client-safe. Avoid internal shorthand or overly blunt phrasing."
+            audience_instruction = "Write for an external client. Keep the tone polished, representative, and client-safe. Do not sound internal or operational. Avoid internal shorthand, ownership language, or task-tracking phrasing. Focus on outcomes, alignment, and agreed next steps."
         else:
             audience_instruction = "Write for an internal team. Keep it practical, clear, and execution-oriented."
 
@@ -415,6 +415,10 @@ Subject requirements:
 - Hebrew
 - Professional
 - Based on the meeting name and date
+- Adapt to audience:
+  - For "לקוח": more formal and external-facing
+  - For "הנהלה": concise and executive-style
+  - For "צוות פנימי": more direct and practical
 
 Body requirements:
 - Start with: שלום רב,
@@ -429,6 +433,7 @@ Body requirements:
 - For "ניהולי": use bullets and emphasize decisions, risks, and next steps.
 - For "ידידותי": prefer a more natural flowing structure and warmer wording.
 - For "מקצועי": keep a balanced formal structure.
+- For "לקוח": avoid internal operational details and present the meeting as a clear external-facing summary.
 - Do not mention "attachments", "links", "scraped content", or "website content" unless absolutely necessary for understanding the meeting
 """
 
