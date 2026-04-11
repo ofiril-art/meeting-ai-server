@@ -231,6 +231,8 @@ def regenerate_summary():
 
         transcript = (data.get("transcript") or "").strip()
         attachments = data.get("attachments") or []
+        meeting_language = (data.get("meeting_language") or "אוטומטי").strip()
+        print("🌐 Meeting language:", meeting_language, flush=True)
 
         if not transcript:
             return jsonify({"error": "Missing transcript"}), 400
@@ -272,7 +274,10 @@ def regenerate_summary():
 You create improved meeting summaries using the transcript and any attached files metadata.
 
 Rules:
-- Respond in Hebrew.
+- Language rules:
+  - If meeting_language is "אנגלית" → respond in English.
+  - If meeting_language is "עברית" → respond in Hebrew.
+  - If meeting_language is "אוטומטי" → detect from transcript and respond accordingly.
 - Keep English technical terms in English if they are part of the meeting domain.
 - Do not invent facts from attachments you did not actually read.
 - If only attachment file names/types are available, use them only as context hints.
@@ -289,7 +294,7 @@ Rules:
                 },
                 {
                     "role": "user",
-                    "content": user_content
+                    "content": f"Meeting language: {meeting_language}\n\n" + user_content
                 }
             ]
         )
@@ -325,6 +330,8 @@ def generate_email_summary():
         print("✉️ Email style received:", email_style, flush=True)
         email_audience = (data.get("email_audience") or "צוות פנימי").strip()
         print("👥 Email audience received:", email_audience, flush=True)
+        meeting_language = (data.get("meeting_language") or "אוטומטי").strip()
+        print("🌐 Meeting language:", meeting_language, flush=True)
 
         attachments = data.get("attachments", [])
         print("📎 Email attachments received:", attachments, flush=True)
@@ -376,10 +383,13 @@ def generate_email_summary():
             audience_instruction = "Write for an internal team. Keep it practical, clear, and execution-oriented."
 
         prompt = f"""
-You generate a professional meeting summary email in Hebrew.
+You generate a professional meeting summary email.
 
 Rules:
-- Write in Hebrew.
+- Language rules:
+  - If meeting_language is "אנגלית" → write in English.
+  - If meeting_language is "עברית" → write in Hebrew.
+  - If meeting_language is "אוטומטי" → detect from transcript and write accordingly.
 - Keep English terms if they appeared that way.
 - Tone: adapt to the requested style.
 - Style instruction: {style_instruction}
@@ -395,7 +405,7 @@ Rules:
 - The final email must read naturally, like a human wrote it after attending the meeting.
 - Return ONLY valid JSON.
 
-Hidden meeting context:
+Hidden meeting context (meeting_language: {meeting_language}):
 Meeting name: {meeting_name}
 Meeting date: {meeting_date}
 Summary of the meeting: {summary}
