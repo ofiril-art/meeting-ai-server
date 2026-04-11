@@ -258,6 +258,8 @@ def generate_email_summary():
         meeting_date = data.get("meeting_date", "")
 
         attachments = data.get("attachments", [])
+        print("📎 Email attachments received:", attachments, flush=True)
+        print("📎 Email attachments count:", len(attachments), flush=True)
 
         attachment_lines = []
         for item in attachments:
