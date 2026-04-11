@@ -236,6 +236,8 @@ def regenerate_summary():
             return jsonify({"error": "Missing transcript"}), 400
 
         attachment_lines = []
+        link_context_blocks = []
+
         for item in attachments:
             if isinstance(item, dict):
                 file_name = (item.get("fileName") or "").strip()
@@ -244,11 +246,22 @@ def regenerate_summary():
                 if file_name or file_type:
                     attachment_lines.append(f"- {file_name} ({file_type})")
 
+                if file_type.lower() == "link" and file_name:
+                    link_text = fetch_link_text(file_name)
+                    if link_text:
+                        link_context_blocks.append(
+                            f"קישור: {file_name}\nתוכן מהקישור:\n{link_text}"
+                        )
+
         attachment_text = "\n".join(attachment_lines).strip()
+        links_context_text = "\n\n".join(link_context_blocks).strip()
         user_content = transcript
 
         if attachment_text:
             user_content += "\n\nAttachments:\n" + attachment_text
+
+        if links_context_text:
+            user_content += "\n\nLink content:\n" + links_context_text
 
         response = client.responses.create(
             model="gpt-4.1-mini",
@@ -263,6 +276,7 @@ Rules:
 - Keep English technical terms in English if they are part of the meeting domain.
 - Do not invent facts from attachments you did not actually read.
 - If only attachment file names/types are available, use them only as context hints.
+- If link content was fetched successfully, use it as additional factual context for the summary and action items.
 - Return valid JSON only with this exact structure:
 {
   "summary": "short paragraph",
