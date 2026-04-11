@@ -78,6 +78,48 @@ def json_from_text(text: str):
     raise ValueError("No valid JSON found")
 
 
+# Normalize meeting analysis structure for summary/dynamics/speakers/action items
+def normalize_meeting_analysis(parsed):
+    if not isinstance(parsed, dict):
+        return {
+            "summary": "",
+            "action_items": [],
+            "speakers": [],
+            "action_items_by_speaker": [],
+            "meeting_dynamics": {
+                "communication_style": "",
+                "decision_pattern": "",
+                "alignment_level": "",
+                "key_tensions": []
+            }
+        }
+
+    summary = parsed.get("summary", "")
+    action_items = parsed.get("action_items", [])
+    speakers = parsed.get("speakers", [])
+    action_items_by_speaker = parsed.get("action_items_by_speaker", [])
+    meeting_dynamics = parsed.get("meeting_dynamics", {})
+
+    if not isinstance(summary, str):
+        summary = ""
+    if not isinstance(action_items, list):
+        action_items = []
+    if not isinstance(speakers, list):
+        speakers = []
+    if not isinstance(action_items_by_speaker, list):
+        action_items_by_speaker = []
+    if not isinstance(meeting_dynamics, dict):
+        meeting_dynamics = {}
+
+    return {
+        "summary": summary,
+        "action_items": action_items,
+        "speakers": speakers,
+        "action_items_by_speaker": action_items_by_speaker,
+        "meeting_dynamics": meeting_dynamics
+    }
+
+
 # Helper to fetch text from a link, for link attachments
 def fetch_link_text(url: str, max_chars: int = 4000) -> str:
     url = (url or "").strip()
@@ -172,20 +214,37 @@ Rules:
                 {
                     "role": "system",
                     "content": """
-You create concise meeting summaries from transcripts.
+You create concise, structured meeting summaries from transcripts, including speaker analysis and meeting dynamics.
 
 Rules:
 - Respond in Hebrew.
 - Keep English technical terms in English when they appeared that way in the transcript.
 - Do not invent facts.
 - If something is unclear, omit it.
-- Return valid JSON only with this exact structure:
+- Return valid JSON ONLY with this exact structure:
 {
-  "summary": "short paragraph",
-  "action_items": ["item 1", "item 2"]
+  "summary": "short paragraph (2-4 sentences)",
+  "action_items": ["item 1", "item 2"],
+  "speakers": [
+    {"name": "Speaker 1", "role": "Role or title (if known)", "contribution": "Short description of main points, topics, or attitude"},
+    {"name": "Speaker 2", "role": "...", "contribution": "..."}
+  ],
+  "action_items_by_speaker": [
+    {"speaker": "Speaker 1", "items": ["item a", "item b"]},
+    {"speaker": "Speaker 2", "items": ["item c"]}
+  ],
+  "meeting_dynamics": {
+    "communication_style": "Describe the overall style (e.g., collaborative, assertive, formal, informal, etc.)",
+    "decision_pattern": "How were decisions reached? (e.g., consensus, top-down, unclear, etc.)",
+    "alignment_level": "How aligned were participants? (e.g., high, medium, low, specify if there were disagreements)",
+    "key_tensions": ["point of tension or disagreement 1", "point 2"]
+  }
 }
-- summary must be 2-4 sentences.
-- action_items should contain only concrete next steps, and can be empty.
+- summary: 2-4 sentences.
+- action_items: Only concrete next steps, can be empty.
+- speakers: List of main speakers with their roles (if known) and their main contributions.
+- action_items_by_speaker: For each speaker, list their assigned action items (can be empty).
+- meeting_dynamics: Briefly describe the communication style, decision-making, alignment, and any key tensions.
 """
                 },
                 {
@@ -195,25 +254,34 @@ Rules:
             ]
         )
 
-        summary_text = ""
-        action_items = []
-
         try:
             parsed = json_from_text(summary_response.output_text)
-            summary_text = parsed.get("summary", "") if isinstance(parsed, dict) else ""
-            action_items = parsed.get("action_items", []) if isinstance(parsed, dict) else []
-
-            if not isinstance(action_items, list):
-                action_items = []
+            normalized = normalize_meeting_analysis(parsed)
+            summary_text = normalized["summary"]
+            action_items = normalized["action_items"]
+            speakers = normalized["speakers"]
+            action_items_by_speaker = normalized["action_items_by_speaker"]
+            meeting_dynamics = normalized["meeting_dynamics"]
         except Exception:
             summary_text = ""
             action_items = []
+            speakers = []
+            action_items_by_speaker = []
+            meeting_dynamics = {
+                "communication_style": "",
+                "decision_pattern": "",
+                "alignment_level": "",
+                "key_tensions": []
+            }
 
         return jsonify({
             "raw_text": raw_text,
             "text": formatted_text,
             "summary": summary_text,
-            "action_items": action_items
+            "action_items": action_items,
+            "speakers": speakers,
+            "action_items_by_speaker": action_items_by_speaker,
+            "meeting_dynamics": meeting_dynamics
         })
 
     except Exception as e:
@@ -271,7 +339,7 @@ def regenerate_summary():
                 {
                     "role": "system",
                     "content": """
-You generate a smart, high-quality meeting summary.
+You generate a smart, high-quality meeting summary, with speaker analysis and meeting dynamics.
 
 Rules:
 - Language rules:
@@ -295,13 +363,30 @@ Rules:
 - Do NOT paste their content.
 - Do NOT list attachments or links in the output.
 - Keep it concise but meaningful.
-- Return valid JSON only with this exact structure:
+- Return valid JSON ONLY with this exact structure:
 {
-  "summary": "short paragraph",
-  "action_items": ["item 1", "item 2"]
+  "summary": "short paragraph (2-4 sentences)",
+  "action_items": ["item 1", "item 2"],
+  "speakers": [
+    {"name": "Speaker 1", "role": "Role or title (if known)", "contribution": "Short description of main points, topics, or attitude"},
+    {"name": "Speaker 2", "role": "...", "contribution": "..."}
+  ],
+  "action_items_by_speaker": [
+    {"speaker": "Speaker 1", "items": ["item a", "item b"]},
+    {"speaker": "Speaker 2", "items": ["item c"]}
+  ],
+  "meeting_dynamics": {
+    "communication_style": "Describe the overall style (e.g., collaborative, assertive, formal, informal, etc.)",
+    "decision_pattern": "How were decisions reached? (e.g., consensus, top-down, unclear, etc.)",
+    "alignment_level": "How aligned were participants? (e.g., high, medium, low, specify if there were disagreements)",
+    "key_tensions": ["point of tension or disagreement 1", "point 2"]
+  }
 }
-- summary must be 2-4 sentences.
-- action_items must contain only clear, actionable next steps.
+- summary: 2-4 sentences.
+- action_items: Only clear, actionable next steps, can be empty.
+- speakers: List of main speakers with their roles (if known) and their main contributions.
+- action_items_by_speaker: For each speaker, list their assigned action items (can be empty).
+- meeting_dynamics: Briefly describe the communication style, decision-making, alignment, and key tensions.
 - If the output language is English, keep summary and action items in natural professional English.
 - If the output language is Hebrew, keep summary and action items in natural professional Hebrew.
 """
@@ -313,16 +398,32 @@ Rules:
             ]
         )
 
-        parsed = json_from_text(response.output_text)
-        summary_text = parsed.get("summary", "") if isinstance(parsed, dict) else ""
-        action_items = parsed.get("action_items", []) if isinstance(parsed, dict) else []
-
-        if not isinstance(action_items, list):
+        try:
+            parsed = json_from_text(response.output_text)
+            normalized = normalize_meeting_analysis(parsed)
+            summary_text = normalized["summary"]
+            action_items = normalized["action_items"]
+            speakers = normalized["speakers"]
+            action_items_by_speaker = normalized["action_items_by_speaker"]
+            meeting_dynamics = normalized["meeting_dynamics"]
+        except Exception:
+            summary_text = ""
             action_items = []
+            speakers = []
+            action_items_by_speaker = []
+            meeting_dynamics = {
+                "communication_style": "",
+                "decision_pattern": "",
+                "alignment_level": "",
+                "key_tensions": []
+            }
 
         return jsonify({
             "summary": summary_text,
-            "action_items": action_items
+            "action_items": action_items,
+            "speakers": speakers,
+            "action_items_by_speaker": action_items_by_speaker,
+            "meeting_dynamics": meeting_dynamics
         })
 
     except Exception as e:
