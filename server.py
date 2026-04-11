@@ -323,6 +323,8 @@ def generate_email_summary():
 
         email_style = (data.get("email_style") or "מקצועי").strip()
         print("✉️ Email style received:", email_style, flush=True)
+        email_audience = (data.get("email_audience") or "צוות פנימי").strip()
+        print("👥 Email audience received:", email_audience, flush=True)
 
         attachments = data.get("attachments", [])
         print("📎 Email attachments received:", attachments, flush=True)
@@ -365,6 +367,14 @@ def generate_email_summary():
         else:
             style_instruction = "Use a clear, structured, professional tone."
 
+        audience_instruction = ""
+        if email_audience == "הנהלה":
+            audience_instruction = "Write for senior management. Emphasize business impact, decisions, risks, and next steps."
+        elif email_audience == "לקוח":
+            audience_instruction = "Write for an external client. Keep the tone polished, representative, and client-safe. Avoid internal shorthand or overly blunt phrasing."
+        else:
+            audience_instruction = "Write for an internal team. Keep it practical, clear, and execution-oriented."
+
         prompt = f"""
 You generate a professional meeting summary email in Hebrew.
 
@@ -373,6 +383,7 @@ Rules:
 - Keep English terms if they appeared that way.
 - Tone: adapt to the requested style.
 - Style instruction: {style_instruction}
+- Audience instruction: {audience_instruction}
 - Do not invent details.
 - First decide what are the 2-4 MOST important insights from the meeting.
 - Prioritize decisions, risks, and next steps over general discussion.
