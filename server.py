@@ -80,36 +80,66 @@ def json_from_text(text: str):
 
 # Normalize meeting analysis structure for summary/dynamics/speakers/action items
 def normalize_meeting_analysis(parsed):
+    empty_dynamics = {
+        "communication_style": "",
+        "decision_pattern": "",
+        "alignment_level": "",
+        "key_tensions": []
+    }
+
     if not isinstance(parsed, dict):
         return {
             "summary": "",
             "action_items": [],
             "speakers": [],
             "action_items_by_speaker": [],
-            "meeting_dynamics": {
-                "communication_style": "",
-                "decision_pattern": "",
-                "alignment_level": "",
-                "key_tensions": []
-            }
+            "meeting_dynamics": empty_dynamics
         }
 
-    summary = parsed.get("summary", "")
-    action_items = parsed.get("action_items", [])
-    speakers = parsed.get("speakers", [])
-    action_items_by_speaker = parsed.get("action_items_by_speaker", [])
-    meeting_dynamics = parsed.get("meeting_dynamics", {})
+    summary = (parsed.get("summary") or "").strip() if isinstance(parsed.get("summary"), str) else ""
 
-    if not isinstance(summary, str):
-        summary = ""
-    if not isinstance(action_items, list):
-        action_items = []
-    if not isinstance(speakers, list):
-        speakers = []
-    if not isinstance(action_items_by_speaker, list):
-        action_items_by_speaker = []
-    if not isinstance(meeting_dynamics, dict):
-        meeting_dynamics = {}
+    action_items = [
+        i.strip() for i in (parsed.get("action_items") or [])
+        if isinstance(i, str) and i.strip()
+    ]
+
+    speakers = []
+    for item in (parsed.get("speakers") or []):
+        if not isinstance(item, dict):
+            continue
+        name = (item.get("speaker") or item.get("name") or "").strip()
+        role = (item.get("role_hint") or item.get("role") or "").strip()
+        highlights = item.get("highlights")
+        if isinstance(highlights, list):
+            highlights = [h.strip() for h in highlights if isinstance(h, str) and h.strip()]
+        else:
+            contrib = (item.get("contribution") or "").strip()
+            highlights = [contrib] if contrib else []
+        if name or role or highlights:
+            speakers.append({"speaker": name, "role_hint": role, "highlights": highlights})
+
+    action_items_by_speaker = []
+    for item in (parsed.get("action_items_by_speaker") or []):
+        if not isinstance(item, dict):
+            continue
+        name = (item.get("speaker") or item.get("name") or "").strip()
+        items = [
+            a.strip() for a in (item.get("items") or [])
+            if isinstance(a, str) and a.strip()
+        ]
+        if name or items:
+            action_items_by_speaker.append({"speaker": name, "items": items})
+
+    md = parsed.get("meeting_dynamics") or {}
+    if not isinstance(md, dict):
+        md = {}
+
+    meeting_dynamics = {
+        "communication_style": (md.get("communication_style") or "").strip() if isinstance(md.get("communication_style"), str) else "",
+        "decision_pattern": (md.get("decision_pattern") or "").strip() if isinstance(md.get("decision_pattern"), str) else "",
+        "alignment_level": (md.get("alignment_level") or "").strip() if isinstance(md.get("alignment_level"), str) else "",
+        "key_tensions": [k.strip() for k in (md.get("key_tensions") or []) if isinstance(k, str) and k.strip()]
+    }
 
     return {
         "summary": summary,
@@ -232,37 +262,49 @@ Rules:
                 {
                     "role": "system",
                     "content": """
-You create concise, structured meeting summaries from transcripts, including speaker analysis and meeting dynamics.
+You analyze a business meeting transcript and return a high-quality structured result.
 
 Rules:
 - Respond in Hebrew.
-- Keep English technical terms in English when they appeared that way in the transcript.
-- Do not invent facts.
+- Keep English technical/product/business terms in English if they appeared that way in the transcript.
+- Never invent facts, speakers, decisions, deadlines, or action items.
 - If something is unclear, omit it.
+- Ignore filler, repetition, and small talk.
+- Prioritize what matters: decisions, commitments, blockers, risks, open questions, and next steps.
+- If the transcript is weak, partial, or ambiguous, keep the output conservative.
 - Return valid JSON ONLY with this exact structure:
 {
-  "summary": "short paragraph (2-4 sentences)",
-  "action_items": ["item 1", "item 2"],
+  "summary": "2-4 sentence management-quality summary",
+  "action_items": ["clear action item 1", "clear action item 2"],
   "speakers": [
-    {"name": "Speaker 1", "role": "Role or title (if known)", "contribution": "Short description of main points, topics, or attitude"},
-    {"name": "Speaker 2", "role": "...", "contribution": "..."}
+    {
+      "speaker": "Speaker 1",
+      "role_hint": "role if known, otherwise empty string",
+      "highlights": ["main contribution 1", "main contribution 2"]
+    }
   ],
   "action_items_by_speaker": [
-    {"speaker": "Speaker 1", "items": ["item a", "item b"]},
-    {"speaker": "Speaker 2", "items": ["item c"]}
+    {
+      "speaker": "Speaker 1",
+      "items": ["assigned action 1", "assigned action 2"]
+    }
   ],
   "meeting_dynamics": {
-    "communication_style": "Describe the overall style (e.g., collaborative, assertive, formal, informal, etc.)",
-    "decision_pattern": "How were decisions reached? (e.g., consensus, top-down, unclear, etc.)",
-    "alignment_level": "How aligned were participants? (e.g., high, medium, low, specify if there were disagreements)",
-    "key_tensions": ["point of tension or disagreement 1", "point 2"]
+    "communication_style": "short description",
+    "decision_pattern": "short description",
+    "alignment_level": "high / medium / low with short explanation",
+    "key_tensions": ["specific tension 1", "specific tension 2"]
   }
 }
-- summary: 2-4 sentences.
-- action_items: Only concrete next steps, can be empty.
-- speakers: List of main speakers with their roles (if known) and their main contributions.
-- action_items_by_speaker: For each speaker, list their assigned action items (can be empty).
-- meeting_dynamics: Briefly describe the communication style, decision-making, alignment, and any key tensions.
+
+Additional instructions:
+- summary: should read like a concise update someone would send to a manager after the meeting.
+- action_items: include only concrete next steps that someone can actually do.
+- speakers: include only meaningful speakers if they can be inferred from the transcript.
+- action_items_by_speaker: only assign an item to a speaker if the ownership is reasonably clear.
+- meeting_dynamics: describe only what can actually be inferred from the transcript.
+- If there are no reliable action items, return an empty list.
+- If speaker identity is unclear, still use generic labels like "Speaker 1" but do not invent titles.
 """
                 },
                 {
@@ -373,56 +415,55 @@ def regenerate_summary():
                 {
                     "role": "system",
                     "content": """
-You generate a smart, high-quality meeting summary, with speaker analysis and meeting dynamics.
+You generate a smart, management-quality meeting analysis from a transcript and optional attachment context.
 
 Rules:
 - Language rules:
-  - If meeting_language is "אנגלית" → respond in English.
-  - If meeting_language is "עברית" → respond in Hebrew.
-  - If meeting_language is "אוטומטי" → detect from transcript and respond accordingly.
-- Keep English technical terms in English if they are part of the meeting domain.
-- Focus ONLY on what matters:
-  - decisions that were made
-  - action items
-  - important insights
-  - risks or open questions
-- Do NOT summarize everything.
-- Ignore small talk, filler content, and repetition.
-- The summary should feel like what someone who attended the meeting would send to a manager.
-- Do not invent facts from attachments you did not actually read.
-- If only attachment file names/types are available, use them only as context hints.
-- If link content was fetched successfully, use it only as background context.
-- Never copy raw website text into the summary or action items; only extract concise, relevant insights if they genuinely help explain the meeting.
-- If attachments or links exist, use them ONLY if they help explain the meeting.
-- Do NOT paste their content.
-- Do NOT list attachments or links in the output.
-- Keep it concise but meaningful.
+  - If meeting_language is "אנגלית" -> respond in English.
+  - If meeting_language is "עברית" -> respond in Hebrew.
+  - If meeting_language is "אוטומטי" -> detect from the transcript and respond accordingly.
+- Keep English technical/product/business terms in English when appropriate.
+- Never invent facts, names, decisions, ownership, dates, or risks.
+- If something is unclear, omit it.
+- Ignore filler, repetition, and side chatter.
+- Focus on what actually matters: decisions, commitments, blockers, open questions, dependencies, risks, and next steps.
+- Use attachments and fetched link context only as supporting context when clearly relevant.
+- Never copy raw website text, attachment text, or long quotes into the output.
+- If the transcript is partial or weak, keep the output conservative and minimal.
 - Return valid JSON ONLY with this exact structure:
 {
-  "summary": "short paragraph (2-4 sentences)",
-  "action_items": ["item 1", "item 2"],
+  "summary": "2-4 sentence management-quality summary",
+  "action_items": ["clear action item 1", "clear action item 2"],
   "speakers": [
-    {"name": "Speaker 1", "role": "Role or title (if known)", "contribution": "Short description of main points, topics, or attitude"},
-    {"name": "Speaker 2", "role": "...", "contribution": "..."}
+    {
+      "speaker": "Speaker 1",
+      "role_hint": "role if known, otherwise empty string",
+      "highlights": ["main contribution 1", "main contribution 2"]
+    }
   ],
   "action_items_by_speaker": [
-    {"speaker": "Speaker 1", "items": ["item a", "item b"]},
-    {"speaker": "Speaker 2", "items": ["item c"]}
+    {
+      "speaker": "Speaker 1",
+      "items": ["assigned action 1", "assigned action 2"]
+    }
   ],
   "meeting_dynamics": {
-    "communication_style": "Describe the overall style (e.g., collaborative, assertive, formal, informal, etc.)",
-    "decision_pattern": "How were decisions reached? (e.g., consensus, top-down, unclear, etc.)",
-    "alignment_level": "How aligned were participants? (e.g., high, medium, low, specify if there were disagreements)",
-    "key_tensions": ["point of tension or disagreement 1", "point 2"]
+    "communication_style": "short description",
+    "decision_pattern": "short description",
+    "alignment_level": "high / medium / low with short explanation",
+    "key_tensions": ["specific tension 1", "specific tension 2"]
   }
 }
-- summary: 2-4 sentences.
-- action_items: Only clear, actionable next steps, can be empty.
-- speakers: List of main speakers with their roles (if known) and their main contributions.
-- action_items_by_speaker: For each speaker, list their assigned action items (can be empty).
-- meeting_dynamics: Briefly describe the communication style, decision-making, alignment, and key tensions.
-- If the output language is English, keep summary and action items in natural professional English.
-- If the output language is Hebrew, keep summary and action items in natural professional Hebrew.
+
+Additional instructions:
+- summary: should be concise, executive, and useful.
+- action_items: include only concrete, actionable next steps.
+- speakers: capture only real, meaningful participation patterns.
+- action_items_by_speaker: assign ownership only when reasonably supported by the transcript.
+- meeting_dynamics: surface the real dynamics of the meeting, but do not over-interpret.
+- If there are no reliable action items, return an empty list.
+- If the output language is English, write natural professional English.
+- If the output language is Hebrew, write natural professional Hebrew.
 """
                 },
                 {
