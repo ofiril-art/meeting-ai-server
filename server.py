@@ -8,7 +8,7 @@ import requests
 from bs4 import BeautifulSoup
 from openai import OpenAI
 
-app = Flask(__name__)
+app = Flask(__name__) 
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
