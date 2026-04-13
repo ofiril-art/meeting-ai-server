@@ -208,6 +208,24 @@ Rules:
         cleaned_text = fix_mixed_text(cleaned_text)
         formatted_text = add_readable_paragraphs(cleaned_text)
 
+        # 🔒 Guard: avoid AI when transcript too short / weak
+        if len(formatted_text.strip()) < 50:
+            print("❌ Transcript too short on server — skipping AI", flush=True)
+            return jsonify({
+                "raw_text": raw_text,
+                "text": formatted_text,
+                "summary": "",
+                "action_items": [],
+                "speakers": [],
+                "action_items_by_speaker": [],
+                "meeting_dynamics": {
+                    "communication_style": "",
+                    "decision_pattern": "",
+                    "alignment_level": "",
+                    "key_tensions": []
+                }
+            })
+
         summary_response = client.responses.create(
             model="gpt-4.1-mini",
             input=[
@@ -304,6 +322,22 @@ def regenerate_summary():
 
         if not transcript:
             return jsonify({"error": "Missing transcript"}), 400
+
+        # 🔒 Guard: avoid hallucinations on weak transcript
+        if len(transcript.strip()) < 50:
+            print("❌ regenerate_summary: transcript too short (server)", flush=True)
+            return jsonify({
+                "summary": "",
+                "action_items": [],
+                "speakers": [],
+                "action_items_by_speaker": [],
+                "meeting_dynamics": {
+                    "communication_style": "",
+                    "decision_pattern": "",
+                    "alignment_level": "",
+                    "key_tensions": []
+                }
+            })
 
         attachment_lines = []
         link_context_blocks = []
