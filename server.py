@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta
 from flask import Flask, request, jsonify
+from urllib.parse import urlparse
 import os
 import re
 import json
@@ -9,6 +10,11 @@ from bs4 import BeautifulSoup
 from openai import OpenAI
 
 app = Flask(__name__) 
+
+TEAMS_HOST_PATTERNS = {
+    "teams.microsoft.com",
+    "www.teams.microsoft.com",
+}
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
@@ -195,6 +201,42 @@ def fetch_link_text(url: str, max_chars: int = 4000) -> str:
     except Exception as e:
         print(f"❌ Failed fetching link content from {url}: {e}", flush=True)
         return ""
+
+
+# Teams URL helpers
+def is_valid_teams_url(url: str) -> bool:
+    url = (url or "").strip()
+    if not url:
+        return False
+
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        return False
+
+    host = (parsed.netloc or "").lower().strip()
+    scheme = (parsed.scheme or "").lower().strip()
+
+    if scheme not in {"http", "https"}:
+        return False
+
+    if host in TEAMS_HOST_PATTERNS:
+        return True
+
+    return host.endswith(".teams.microsoft.com")
+
+
+def build_teams_prepare_response(meeting_name: str, teams_url: str):
+    return {
+        "ok": True,
+        "status": "received",
+        "provider": "teams",
+        "mode": "prepare_only",
+        "message": "Teams meeting received. Bot integration is not connected yet.",
+        "meeting_name": meeting_name,
+        "teams_url": teams_url,
+        "received_at": datetime.utcnow().isoformat() + "Z"
+    }
 
 
 @app.route("/transcribe", methods=["POST"])
@@ -669,6 +711,36 @@ Body requirements:
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+
+
+@app.route("/teams/prepare-recording", methods=["POST"])
+def teams_prepare_recording():
+    try:
+        data = request.get_json(silent=True) or {}
+
+        meeting_name = (data.get("meeting_name") or "").strip()
+        teams_url = (data.get("teams_url") or "").strip()
+
+        if not meeting_name:
+            return jsonify({"ok": False, "error": "Missing meeting_name"}), 400
+
+        if not teams_url:
+            return jsonify({"ok": False, "error": "Missing teams_url"}), 400
+
+        if not is_valid_teams_url(teams_url):
+            return jsonify({"ok": False, "error": "Invalid Teams URL"}), 400
+
+        print("📅 Teams prepare request received", flush=True)
+        print(f"   meeting_name: {meeting_name}", flush=True)
+        print(f"   teams_url: {teams_url}", flush=True)
+
+        return jsonify(build_teams_prepare_response(meeting_name, teams_url))
+
+    except Exception as e:
+        print(f"❌ teams_prepare_recording error: {e}", flush=True)
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 
 @app.route("/", methods=["GET"])
