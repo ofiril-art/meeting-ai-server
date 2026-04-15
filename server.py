@@ -17,6 +17,7 @@ TEAMS_HOST_PATTERNS = {
 }
 TEAMS_SESSIONS = {}
 TEAMS_BOT_MODE = "mock"
+TEAMS_JOB_STATES_ACTIVE = {"created", "start_requested", "booting_bot", "joining_meeting", "recording"}
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
@@ -232,6 +233,54 @@ def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+def apply_teams_session_updates(session: dict, **updates):
+    for key, value in updates.items():
+        session[key] = value
+    session["updated_at"] = utc_now_iso()
+    return session
+
+
+def refresh_teams_session(session: dict):
+    if TEAMS_BOT_MODE == "mock":
+        return update_mock_teams_session_status(session)
+    return session
+
+
+def start_teams_bot_for_session(session: dict):
+    current_status = (session.get("status") or "").strip().lower()
+    current_job_state = (session.get("job_state") or "").strip().lower()
+
+    if current_status == "stopped":
+        raise ValueError("Session already stopped")
+
+    if current_job_state in {"start_requested", "booting_bot", "joining_meeting", "recording"}:
+        return session
+
+    if TEAMS_BOT_MODE == "mock":
+        return apply_teams_session_updates(
+            session,
+            job_state="start_requested",
+            last_error=None,
+        )
+
+    return apply_teams_session_updates(
+        session,
+        job_state="start_requested",
+        last_error=None,
+    )
+
+
+def stop_teams_bot_for_session(session: dict):
+    now = utc_now_iso()
+    return apply_teams_session_updates(
+        session,
+        status="stopped",
+        job_state="stopped",
+        stopped_at=now,
+        last_error=None,
+    )
+
+
 
 def create_teams_session_record(meeting_name: str, teams_url: str):
     now = datetime.utcnow()
@@ -283,6 +332,8 @@ def build_teams_prepare_response(session):
 
 def update_mock_teams_session_status(session):
     current_status = (session.get("status") or "").strip().lower()
+    current_job_state = (session.get("job_state") or "").strip().lower()
+
     if current_status == "stopped":
         return session
 
@@ -296,23 +347,43 @@ def update_mock_teams_session_status(session):
     now = datetime.now(timezone.utc)
     elapsed_seconds = max(0, int((now - received_dt).total_seconds()))
 
-    if elapsed_seconds < 10:
-        session["status"] = "queued"
-        session["job_state"] = "created"
+    if current_job_state == "start_requested" and elapsed_seconds < 10:
+        return apply_teams_session_updates(
+            session,
+            status="queued",
+            job_state="start_requested",
+            last_error=None,
+        )
+    elif elapsed_seconds < 10:
+        return apply_teams_session_updates(
+            session,
+            status="queued",
+            job_state="created",
+            last_error=None,
+        )
     elif elapsed_seconds < 20:
-        session["status"] = "bot_preparing"
-        session["job_state"] = "booting_bot"
+        return apply_teams_session_updates(
+            session,
+            status="bot_preparing",
+            job_state="booting_bot",
+            last_error=None,
+        )
     elif elapsed_seconds < 30:
-        session["status"] = "bot_joining"
-        session["job_state"] = "joining_meeting"
-        session["started_at"] = session.get("started_at") or utc_now_iso()
+        return apply_teams_session_updates(
+            session,
+            status="bot_joining",
+            job_state="joining_meeting",
+            started_at=session.get("started_at") or utc_now_iso(),
+            last_error=None,
+        )
     else:
-        session["status"] = "recording"
-        session["job_state"] = "recording"
-        session["started_at"] = session.get("started_at") or utc_now_iso()
-
-    session["updated_at"] = utc_now_iso()
-    return session
+        return apply_teams_session_updates(
+            session,
+            status="recording",
+            job_state="recording",
+            started_at=session.get("started_at") or utc_now_iso(),
+            last_error=None,
+        )
 
 
 @app.route("/transcribe", methods=["POST"])
@@ -834,7 +905,7 @@ def get_teams_session(session_id):
     if not session:
         return jsonify({"ok": False, "error": "Session not found"}), 404
 
-    session = update_mock_teams_session_status(session)
+    session = refresh_teams_session(session)
 
     print(f"🔄 Teams session status refresh: {session_id} -> {session['status']} ({session.get('job_state')})", flush=True)
 
@@ -851,14 +922,12 @@ def start_teams_session_bot(session_id):
     if not session:
         return jsonify({"ok": False, "error": "Session not found"}), 404
 
-    current_status = (session.get("status") or "").strip().lower()
-    if current_status == "stopped":
-        return jsonify({"ok": False, "error": "Session already stopped"}), 400
+    try:
+        session = start_teams_bot_for_session(session)
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
 
-    session["job_state"] = "start_requested"
-    session["updated_at"] = utc_now_iso()
-
-    print(f"🚀 Teams start-bot requested: {session_id}", flush=True)
+    print(f"🚀 Teams start-bot requested: {session_id} ({session.get('job_state')})", flush=True)
 
     return jsonify({
         "ok": True,
@@ -874,11 +943,7 @@ def stop_teams_session(session_id):
     if not session:
         return jsonify({"ok": False, "error": "Session not found"}), 404
 
-    now = utc_now_iso()
-    session["status"] = "stopped"
-    session["job_state"] = "stopped"
-    session["updated_at"] = now
-    session["stopped_at"] = now
+    session = stop_teams_bot_for_session(session)
 
     print(f"🛑 Teams session stopped: {session_id}", flush=True)
 
