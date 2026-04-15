@@ -227,15 +227,19 @@ def is_valid_teams_url(url: str) -> bool:
 
 
 def build_teams_prepare_response(meeting_name: str, teams_url: str):
+    now = datetime.utcnow()
+    session_id = f"teams_{now.strftime('%Y%m%d%H%M%S%f')}"
+
     return {
         "ok": True,
-        "status": "received",
+        "session_id": session_id,
+        "status": "queued",
         "provider": "teams",
         "mode": "prepare_only",
         "message": "Teams meeting received. Bot integration is not connected yet.",
         "meeting_name": meeting_name,
         "teams_url": teams_url,
-        "received_at": datetime.utcnow().isoformat() + "Z"
+        "received_at": now.isoformat() + "Z"
     }
 
 
@@ -736,25 +740,16 @@ def teams_prepare_recording():
         print(f"   meeting_name: {meeting_name}", flush=True)
         print(f"   teams_url: {teams_url}", flush=True)
 
-        return jsonify(build_teams_prepare_response(meeting_name, teams_url))
+        response = build_teams_prepare_response(meeting_name, teams_url)
+        print(f"   session_id: {response['session_id']}", flush=True)
+        print(f"   status: {response['status']}", flush=True)
+
+        return jsonify(response)
 
     except Exception as e:
         print(f"❌ teams_prepare_recording error: {e}", flush=True)
         return jsonify({"ok": False, "error": str(e)}), 500
 
-
-@app.route("/", methods=["GET"])
-def home():
-    return "Transcription server is running 🚀"
-
-
-if __name__ == "__main__":
-    port = int(os.getenv("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
-    
-    
-from datetime import datetime
-from flask import request, jsonify
 
 @app.route("/extract-date", methods=["POST"])
 def extract_date():
@@ -822,3 +817,13 @@ YYYY-MM-DD or null
     except Exception as e:
         print("❌ extract_date error:", e)
         return jsonify({"date": None})
+
+
+@app.route("/", methods=["GET"])
+def home():
+    return "Transcription server is running 🚀"
+
+
+if __name__ == "__main__":
+    port = int(os.getenv("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
