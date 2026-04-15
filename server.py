@@ -257,6 +257,10 @@ def build_teams_prepare_response(meeting_name: str, teams_url: str):
 
 
 def update_mock_teams_session_status(session):
+    current_status = (session.get("status") or "").strip().lower()
+    if current_status == "stopped":
+        return session
+
     received_at = session.get("received_at") or ""
 
     try:
@@ -802,6 +806,27 @@ def get_teams_session(session_id):
 
     return jsonify({
         "ok": True,
+        "session": session
+    })
+
+
+@app.route("/teams/session/<session_id>/stop", methods=["POST"])
+def stop_teams_session(session_id):
+    session = TEAMS_SESSIONS.get(session_id)
+
+    if not session:
+        return jsonify({"ok": False, "error": "Session not found"}), 404
+
+    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    session["status"] = "stopped"
+    session["updated_at"] = now
+    session["stopped_at"] = now
+
+    print(f"🛑 Teams session stopped: {session_id}", flush=True)
+
+    return jsonify({
+        "ok": True,
+        "message": "Teams session stopped.",
         "session": session
     })
 
