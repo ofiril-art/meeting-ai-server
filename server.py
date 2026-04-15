@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from flask import Flask, request, jsonify
 from urllib.parse import urlparse
 import os
@@ -254,6 +254,30 @@ def build_teams_prepare_response(meeting_name: str, teams_url: str):
         "teams_url": teams_url,
         "received_at": session["received_at"]
     }
+
+
+def update_mock_teams_session_status(session):
+    received_at = session.get("received_at") or ""
+
+    try:
+        received_dt = datetime.fromisoformat(received_at.replace("Z", "+00:00"))
+    except Exception:
+        return session
+
+    now = datetime.now(timezone.utc)
+    elapsed_seconds = max(0, int((now - received_dt).total_seconds()))
+
+    if elapsed_seconds < 10:
+        session["status"] = "queued"
+    elif elapsed_seconds < 20:
+        session["status"] = "bot_preparing"
+    elif elapsed_seconds < 30:
+        session["status"] = "bot_joining"
+    else:
+        session["status"] = "recording"
+
+    session["updated_at"] = now.isoformat().replace("+00:00", "Z")
+    return session
 
 
 @app.route("/transcribe", methods=["POST"])
@@ -771,6 +795,10 @@ def get_teams_session(session_id):
 
     if not session:
         return jsonify({"ok": False, "error": "Session not found"}), 404
+
+    session = update_mock_teams_session_status(session)
+
+    print(f"🔄 Teams session status refresh: {session_id} -> {session['status']}", flush=True)
 
     return jsonify({
         "ok": True,
