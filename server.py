@@ -15,6 +15,7 @@ TEAMS_HOST_PATTERNS = {
     "teams.microsoft.com",
     "www.teams.microsoft.com",
 }
+TEAMS_SESSIONS = {}
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
@@ -230,16 +231,28 @@ def build_teams_prepare_response(meeting_name: str, teams_url: str):
     now = datetime.utcnow()
     session_id = f"teams_{now.strftime('%Y%m%d%H%M%S%f')}"
 
-    return {
-        "ok": True,
+    session = {
         "session_id": session_id,
+        "meeting_name": meeting_name,
+        "teams_url": teams_url,
         "status": "queued",
         "provider": "teams",
         "mode": "prepare_only",
+        "received_at": now.isoformat() + "Z"
+    }
+
+    TEAMS_SESSIONS[session_id] = session
+
+    return {
+        "ok": True,
+        "session_id": session_id,
+        "status": session["status"],
+        "provider": session["provider"],
+        "mode": session["mode"],
         "message": "Teams meeting received. Bot integration is not connected yet.",
         "meeting_name": meeting_name,
         "teams_url": teams_url,
-        "received_at": now.isoformat() + "Z"
+        "received_at": session["received_at"]
     }
 
 
@@ -750,6 +763,19 @@ def teams_prepare_recording():
         print(f"❌ teams_prepare_recording error: {e}", flush=True)
         return jsonify({"ok": False, "error": str(e)}), 500
 
+
+
+@app.route("/teams/session/<session_id>", methods=["GET"])
+def get_teams_session(session_id):
+    session = TEAMS_SESSIONS.get(session_id)
+
+    if not session:
+        return jsonify({"ok": False, "error": "Session not found"}), 404
+
+    return jsonify({
+        "ok": True,
+        "session": session
+    })
 
 @app.route("/extract-date", methods=["POST"])
 def extract_date():
