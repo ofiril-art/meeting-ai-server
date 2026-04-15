@@ -16,6 +16,7 @@ TEAMS_HOST_PATTERNS = {
     "www.teams.microsoft.com",
 }
 TEAMS_SESSIONS = {}
+TEAMS_BOT_MODE = "mock"
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
@@ -227,32 +228,56 @@ def is_valid_teams_url(url: str) -> bool:
     return host.endswith(".teams.microsoft.com")
 
 
-def build_teams_prepare_response(meeting_name: str, teams_url: str):
+def utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+
+def create_teams_session_record(meeting_name: str, teams_url: str):
     now = datetime.utcnow()
     session_id = f"teams_{now.strftime('%Y%m%d%H%M%S%f')}"
+    created_at = utc_now_iso()
 
     session = {
         "session_id": session_id,
-        "meeting_name": meeting_name,
-        "teams_url": teams_url,
-        "status": "queued",
         "provider": "teams",
+        "join_url": teams_url,
+        "teams_url": teams_url,
+        "meeting_name": meeting_name,
+        "status": "queued",
         "mode": "prepare_only",
-        "received_at": now.isoformat() + "Z"
+        "bot_mode": TEAMS_BOT_MODE,
+        "job_state": "created",
+        "last_error": None,
+        "created_at": created_at,
+        "updated_at": created_at,
+        "received_at": created_at,
+        "started_at": None,
+        "stopped_at": None,
     }
 
     TEAMS_SESSIONS[session_id] = session
+    return session
 
+
+
+def build_teams_prepare_response(session):
     return {
         "ok": True,
-        "session_id": session_id,
+        "session_id": session["session_id"],
         "status": session["status"],
         "provider": session["provider"],
         "mode": session["mode"],
+        "bot_mode": session["bot_mode"],
+        "job_state": session["job_state"],
         "message": "Teams meeting received. Bot integration is not connected yet.",
-        "meeting_name": meeting_name,
-        "teams_url": teams_url,
-        "received_at": session["received_at"]
+        "meeting_name": session["meeting_name"],
+        "teams_url": session["teams_url"],
+        "join_url": session["join_url"],
+        "created_at": session["created_at"],
+        "updated_at": session["updated_at"],
+        "received_at": session["received_at"],
+        "last_error": session["last_error"],
     }
 
 
@@ -273,14 +298,20 @@ def update_mock_teams_session_status(session):
 
     if elapsed_seconds < 10:
         session["status"] = "queued"
+        session["job_state"] = "created"
     elif elapsed_seconds < 20:
         session["status"] = "bot_preparing"
+        session["job_state"] = "booting_bot"
     elif elapsed_seconds < 30:
         session["status"] = "bot_joining"
+        session["job_state"] = "joining_meeting"
+        session["started_at"] = session.get("started_at") or utc_now_iso()
     else:
         session["status"] = "recording"
+        session["job_state"] = "recording"
+        session["started_at"] = session.get("started_at") or utc_now_iso()
 
-    session["updated_at"] = now.isoformat().replace("+00:00", "Z")
+    session["updated_at"] = utc_now_iso()
     return session
 
 
@@ -781,9 +812,12 @@ def teams_prepare_recording():
         print(f"   meeting_name: {meeting_name}", flush=True)
         print(f"   teams_url: {teams_url}", flush=True)
 
-        response = build_teams_prepare_response(meeting_name, teams_url)
+        session = create_teams_session_record(meeting_name, teams_url)
+        response = build_teams_prepare_response(session)
+
         print(f"   session_id: {response['session_id']}", flush=True)
         print(f"   status: {response['status']}", flush=True)
+        print(f"   job_state: {response['job_state']}", flush=True)
 
         return jsonify(response)
 
@@ -802,10 +836,33 @@ def get_teams_session(session_id):
 
     session = update_mock_teams_session_status(session)
 
-    print(f"🔄 Teams session status refresh: {session_id} -> {session['status']}", flush=True)
+    print(f"🔄 Teams session status refresh: {session_id} -> {session['status']} ({session.get('job_state')})", flush=True)
 
     return jsonify({
         "ok": True,
+        "session": session
+    })
+
+
+@app.route("/teams/session/<session_id>/start-bot", methods=["POST"])
+def start_teams_session_bot(session_id):
+    session = TEAMS_SESSIONS.get(session_id)
+
+    if not session:
+        return jsonify({"ok": False, "error": "Session not found"}), 404
+
+    current_status = (session.get("status") or "").strip().lower()
+    if current_status == "stopped":
+        return jsonify({"ok": False, "error": "Session already stopped"}), 400
+
+    session["job_state"] = "start_requested"
+    session["updated_at"] = utc_now_iso()
+
+    print(f"🚀 Teams start-bot requested: {session_id}", flush=True)
+
+    return jsonify({
+        "ok": True,
+        "message": "Teams bot start request accepted.",
         "session": session
     })
 
@@ -817,8 +874,9 @@ def stop_teams_session(session_id):
     if not session:
         return jsonify({"ok": False, "error": "Session not found"}), 404
 
-    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    now = utc_now_iso()
     session["status"] = "stopped"
+    session["job_state"] = "stopped"
     session["updated_at"] = now
     session["stopped_at"] = now
 
