@@ -642,7 +642,7 @@ def update_mock_zoom_session_status(session):
         return session
 
     if current_job_state in {"recording", "failed"}:
-    return session
+        return session
 
     received_at = session.get("received_at") or ""
 
