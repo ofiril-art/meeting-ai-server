@@ -19,7 +19,19 @@ TEAMS_SESSIONS = {}
 TEAMS_BOT_MODE = "mock"
 TEAMS_JOB_STATES_ACTIVE = {"created", "start_requested", "booting_bot", "joining_meeting", "incoming_call", "joining", "connected", "recording", "failed"}
 TEAMS_BOT_EVENT_LOGS = []
+
 TEAMS_STATE_FILE = os.getenv("TEAMS_STATE_FILE", "teams_state.json")
+
+ZOOM_HOST_PATTERNS = {
+    "zoom.us",
+    "www.zoom.us",
+    "us02web.zoom.us",
+    "us03web.zoom.us",
+    "us04web.zoom.us",
+    "us05web.zoom.us",
+    "us06web.zoom.us",
+}
+ZOOM_SESSIONS = {}
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
@@ -229,6 +241,28 @@ def is_valid_teams_url(url: str) -> bool:
         return True
 
     return host.endswith(".teams.microsoft.com")
+
+
+def is_valid_zoom_url(url: str) -> bool:
+    url = (url or "").strip()
+    if not url:
+        return False
+
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        return False
+
+    host = (parsed.netloc or "").lower().strip()
+    scheme = (parsed.scheme or "").lower().strip()
+
+    if scheme not in {"http", "https"}:
+        return False
+
+    if host in ZOOM_HOST_PATTERNS:
+        return True
+
+    return host.endswith(".zoom.us")
 
 
 def utc_now_iso() -> str:
@@ -488,6 +522,7 @@ def create_teams_session_record(meeting_name: str, teams_url: str):
 
 
 
+
 def build_teams_prepare_response(session):
     return {
         "ok": True,
@@ -506,6 +541,86 @@ def build_teams_prepare_response(session):
         "received_at": session["received_at"],
         "last_error": session["last_error"],
     }
+
+
+def create_zoom_session_record(meeting_name: str, zoom_url: str):
+    now = datetime.utcnow()
+    session_id = f"zoom_{now.strftime('%Y%m%d%H%M%S%f')}"
+    created_at = utc_now_iso()
+
+    session = {
+        "session_id": session_id,
+        "provider": "zoom",
+        "join_url": zoom_url,
+        "zoom_url": zoom_url,
+        "meeting_name": meeting_name,
+        "status": "queued",
+        "mode": "prepare_only",
+        "bot_mode": "mock",
+        "job_state": "created",
+        "last_error": None,
+        "created_at": created_at,
+        "updated_at": created_at,
+        "received_at": created_at,
+        "started_at": None,
+        "stopped_at": None,
+    }
+
+    ZOOM_SESSIONS[session_id] = session
+    return session
+
+
+
+def build_zoom_prepare_response(session):
+    return {
+        "ok": True,
+        "session_id": session["session_id"],
+        "status": session["status"],
+        "provider": session["provider"],
+        "mode": session["mode"],
+        "bot_mode": session["bot_mode"],
+        "job_state": session["job_state"],
+        "message": "Zoom meeting received. Bot integration is not connected yet.",
+        "meeting_name": session["meeting_name"],
+        "zoom_url": session["zoom_url"],
+        "join_url": session["join_url"],
+        "created_at": session["created_at"],
+        "updated_at": session["updated_at"],
+        "received_at": session["received_at"],
+        "last_error": session["last_error"],
+    }
+
+
+
+def update_mock_zoom_session_status(session):
+    current_status = (session.get("status") or "").strip().lower()
+    if current_status == "stopped":
+        return session
+
+    received_at = session.get("received_at") or ""
+
+    try:
+        received_dt = datetime.fromisoformat(received_at.replace("Z", "+00:00"))
+    except Exception:
+        return session
+
+    now = datetime.now(timezone.utc)
+    elapsed_seconds = max(0, int((now - received_dt).total_seconds()))
+
+    if elapsed_seconds < 10:
+        session["status"] = "queued"
+        session["job_state"] = "created"
+    elif elapsed_seconds < 20:
+        session["status"] = "bot_joining"
+        session["job_state"] = "joining"
+        session["started_at"] = session.get("started_at") or utc_now_iso()
+    else:
+        session["status"] = "recording"
+        session["job_state"] = "recording"
+        session["started_at"] = session.get("started_at") or utc_now_iso()
+
+    session["updated_at"] = utc_now_iso()
+    return session
 
 
 def update_mock_teams_session_status(session):
@@ -1237,6 +1352,80 @@ def list_teams_session_events(session_id):
         "events": detailed_events,
         "event_refs": session_event_refs,
     })
+
+@app.route("/zoom/prepare-recording", methods=["POST"])
+def zoom_prepare_recording():
+    try:
+        data = request.get_json(silent=True) or {}
+
+        meeting_name = (data.get("meeting_name") or "").strip()
+        zoom_url = (data.get("zoom_url") or "").strip()
+
+        if not meeting_name:
+            return jsonify({"ok": False, "error": "Missing meeting_name"}), 400
+
+        if not zoom_url:
+            return jsonify({"ok": False, "error": "Missing zoom_url"}), 400
+
+        if not is_valid_zoom_url(zoom_url):
+            return jsonify({"ok": False, "error": "Invalid Zoom URL"}), 400
+
+        print("📅 Zoom prepare request received", flush=True)
+        print(f"   meeting_name: {meeting_name}", flush=True)
+        print(f"   zoom_url: {zoom_url}", flush=True)
+
+        session = create_zoom_session_record(meeting_name, zoom_url)
+        response = build_zoom_prepare_response(session)
+
+        print(f"   session_id: {response['session_id']}", flush=True)
+        print(f"   status: {response['status']}", flush=True)
+        print(f"   job_state: {response['job_state']}", flush=True)
+
+        return jsonify(response)
+
+    except Exception as e:
+        print(f"❌ zoom_prepare_recording error: {e}", flush=True)
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/zoom/session/<session_id>", methods=["GET"])
+def get_zoom_session(session_id):
+    session = ZOOM_SESSIONS.get(session_id)
+
+    if not session:
+        return jsonify({"ok": False, "error": "Session not found"}), 404
+
+    session = update_mock_zoom_session_status(session)
+
+    print(f"🔄 Zoom session status refresh: {session_id} -> {session['status']} ({session.get('job_state')})", flush=True)
+
+    return jsonify({
+        "ok": True,
+        "session": session
+    })
+
+
+@app.route("/zoom/session/<session_id>/stop", methods=["POST"])
+def stop_zoom_session(session_id):
+    session = ZOOM_SESSIONS.get(session_id)
+
+    if not session:
+        return jsonify({"ok": False, "error": "Session not found"}), 404
+
+    now = utc_now_iso()
+    session["status"] = "stopped"
+    session["job_state"] = "stopped"
+    session["updated_at"] = now
+    session["stopped_at"] = now
+
+    print(f"🛑 Zoom session stopped: {session_id}", flush=True)
+
+    return jsonify({
+        "ok": True,
+        "message": "Zoom session stopped.",
+        "session": session
+    })
+
 
 @app.route("/extract-date", methods=["POST"])
 def extract_date():
