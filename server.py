@@ -17,7 +17,7 @@ TEAMS_HOST_PATTERNS = {
 }
 TEAMS_SESSIONS = {}
 TEAMS_BOT_MODE = "mock"
-TEAMS_JOB_STATES_ACTIVE = {"created", "start_requested", "booting_bot", "joining_meeting", "recording"}
+TEAMS_JOB_STATES_ACTIVE = {"created", "start_requested", "booting_bot", "joining_meeting", "incoming_call", "joining", "connected", "recording", "failed"}
 TEAMS_BOT_EVENT_LOGS = []
 TEAMS_STATE_FILE = os.getenv("TEAMS_STATE_FILE", "teams_state.json")
 
@@ -513,6 +513,12 @@ def update_mock_teams_session_status(session):
     current_job_state = (session.get("job_state") or "").strip().lower()
 
     if current_status == "stopped":
+        return session
+
+    # Do not let the timer-based mock flow override real calling webhook state.
+    # Once calling events moved the session into a live bot/call state, keep it as-is
+    # until a new webhook changes it again.
+    if current_job_state in {"incoming_call", "joining", "connected", "recording", "failed"}:
         return session
 
     received_at = session.get("received_at") or ""
