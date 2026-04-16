@@ -18,6 +18,7 @@ TEAMS_HOST_PATTERNS = {
 TEAMS_SESSIONS = {}
 TEAMS_BOT_MODE = "mock"
 TEAMS_JOB_STATES_ACTIVE = {"created", "start_requested", "booting_bot", "joining_meeting", "recording"}
+TEAMS_BOT_EVENT_LOGS = []
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
@@ -233,10 +234,136 @@ def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+
 def apply_teams_session_updates(session: dict, **updates):
     for key, value in updates.items():
         session[key] = value
     session["updated_at"] = utc_now_iso()
+    return session
+
+
+def append_teams_bot_event(event_type: str, payload=None, session_id: str | None = None, note: str | None = None):
+    entry = {
+        "event_id": f"evt_{datetime.utcnow().strftime('%Y%m%d%H%M%S%f')}",
+        "event_type": (event_type or "unknown").strip(),
+        "session_id": (session_id or "").strip() or None,
+        "received_at": utc_now_iso(),
+        "note": (note or "").strip() or None,
+        "payload": payload if isinstance(payload, (dict, list)) else payload,
+    }
+    TEAMS_BOT_EVENT_LOGS.append(entry)
+    if len(TEAMS_BOT_EVENT_LOGS) > 200:
+        del TEAMS_BOT_EVENT_LOGS[:-200]
+    return entry
+
+
+
+def find_teams_session_by_join_url(join_url: str):
+    normalized = (join_url or "").strip()
+    if not normalized:
+        return None
+
+    for session in TEAMS_SESSIONS.values():
+        candidates = [
+            (session.get("join_url") or "").strip(),
+            (session.get("teams_url") or "").strip(),
+        ]
+        if normalized in candidates:
+            return session
+
+    return None
+
+
+
+def attach_event_to_matching_session(payload, preferred_session_id: str | None = None):
+    if preferred_session_id:
+        session = TEAMS_SESSIONS.get(preferred_session_id)
+        if session:
+            return session
+
+    if isinstance(payload, dict):
+        direct_session_id = (payload.get("session_id") or payload.get("sessionId") or "").strip()
+        if direct_session_id:
+            session = TEAMS_SESSIONS.get(direct_session_id)
+            if session:
+                return session
+
+        possible_join_urls = [
+            payload.get("join_url"),
+            payload.get("joinUrl"),
+            payload.get("teams_url"),
+            payload.get("teamsUrl"),
+            payload.get("meeting_url"),
+            payload.get("meetingUrl"),
+        ]
+
+        for value in possible_join_urls:
+            session = find_teams_session_by_join_url((value or "").strip())
+            if session:
+                return session
+
+    return None
+
+
+
+def update_session_from_calling_event(session: dict, payload):
+    if not isinstance(payload, dict):
+        return session
+
+    event_name = (
+        payload.get("event")
+        or payload.get("event_type")
+        or payload.get("eventType")
+        or payload.get("type")
+        or ""
+    ).strip().lower()
+
+    if event_name in {"incoming_call", "incomingcall", "ringing"}:
+        return apply_teams_session_updates(
+            session,
+            status="bot_preparing",
+            job_state="incoming_call",
+            last_error=None,
+        )
+
+    if event_name in {"joining", "join_requested", "joinrequested", "connecting"}:
+        return apply_teams_session_updates(
+            session,
+            status="bot_joining",
+            job_state="joining",
+            started_at=session.get("started_at") or utc_now_iso(),
+            last_error=None,
+        )
+
+    if event_name in {"connected", "call_connected", "callconnected", "recording_started", "recordingstarted"}:
+        return apply_teams_session_updates(
+            session,
+            status="recording",
+            job_state="connected",
+            started_at=session.get("started_at") or utc_now_iso(),
+            last_error=None,
+        )
+
+    if event_name in {"recording", "recording_in_progress", "recordinginprogress"}:
+        return apply_teams_session_updates(
+            session,
+            status="recording",
+            job_state="recording",
+            started_at=session.get("started_at") or utc_now_iso(),
+            last_error=None,
+        )
+
+    if event_name in {"stopped", "call_ended", "callended", "hangup", "ended"}:
+        return stop_teams_bot_for_session(session)
+
+    if event_name in {"failed", "error", "call_failed", "callfailed"}:
+        return apply_teams_session_updates(
+            session,
+            status="failed",
+            job_state="failed",
+            last_error=(payload.get("error") or payload.get("message") or "Calling event failed").strip(),
+        )
+
     return session
 
 
@@ -253,8 +380,19 @@ def start_teams_bot_for_session(session: dict):
     if current_status == "stopped":
         raise ValueError("Session already stopped")
 
-    if current_job_state in {"start_requested", "booting_bot", "joining_meeting", "recording"}:
+    if current_job_state in {"start_requested", "booting_bot", "joining_meeting", "recording", "joining", "connected"}:
         return session
+
+    append_teams_bot_event(
+        event_type="start_bot_requested",
+        payload={
+            "session_id": session.get("session_id"),
+            "meeting_name": session.get("meeting_name"),
+            "join_url": session.get("join_url"),
+        },
+        session_id=session.get("session_id"),
+        note="Start bot requested from app",
+    )
 
     if TEAMS_BOT_MODE == "mock":
         return apply_teams_session_updates(
@@ -303,6 +441,7 @@ def create_teams_session_record(meeting_name: str, teams_url: str):
         "received_at": created_at,
         "started_at": None,
         "stopped_at": None,
+        "bot_events": [],
     }
 
     TEAMS_SESSIONS[session_id] = session
@@ -936,6 +1075,7 @@ def start_teams_session_bot(session_id):
     })
 
 
+
 @app.route("/teams/session/<session_id>/stop", methods=["POST"])
 def stop_teams_session(session_id):
     session = TEAMS_SESSIONS.get(session_id)
@@ -951,6 +1091,76 @@ def stop_teams_session(session_id):
         "ok": True,
         "message": "Teams session stopped.",
         "session": session
+    })
+
+
+
+@app.route("/api/messages", methods=["POST"])
+def teams_bot_messages_webhook():
+    payload = request.get_json(silent=True)
+    raw_body = request.get_data(as_text=True)
+
+    event = append_teams_bot_event(
+        event_type="bot_messages_webhook",
+        payload=payload if payload is not None else raw_body,
+        note="Received Bot Framework messages webhook",
+    )
+
+    print("📨 /api/messages webhook received", flush=True)
+    if isinstance(payload, dict):
+        print(f"   keys: {list(payload.keys())}", flush=True)
+    else:
+        print("   payload is not valid JSON", flush=True)
+
+    return jsonify({
+        "ok": True,
+        "accepted": True,
+        "event_id": event["event_id"],
+    }), 202
+
+
+@app.route("/api/calling", methods=["POST"])
+def teams_bot_calling_webhook():
+    payload = request.get_json(silent=True)
+    raw_body = request.get_data(as_text=True)
+
+    session = attach_event_to_matching_session(payload)
+    event = append_teams_bot_event(
+        event_type="bot_calling_webhook",
+        payload=payload if payload is not None else raw_body,
+        session_id=session.get("session_id") if session else None,
+        note="Received Teams calling webhook",
+    )
+
+    if session:
+        bot_events = session.setdefault("bot_events", [])
+        bot_events.append({
+            "event_id": event["event_id"],
+            "received_at": event["received_at"],
+            "event_type": event["event_type"],
+        })
+        if len(bot_events) > 50:
+            del bot_events[:-50]
+
+        update_session_from_calling_event(session, payload if isinstance(payload, dict) else {})
+        print(f"📞 /api/calling webhook matched session: {session.get('session_id')}", flush=True)
+        print(f"   status -> {session.get('status')} ({session.get('job_state')})", flush=True)
+    else:
+        print("📞 /api/calling webhook received with no matching session", flush=True)
+
+    return jsonify({
+        "ok": True,
+        "accepted": True,
+        "event_id": event["event_id"],
+        "matched_session_id": session.get("session_id") if session else None,
+    }), 202
+
+
+@app.route("/teams/events", methods=["GET"])
+def list_teams_bot_events():
+    return jsonify({
+        "ok": True,
+        "events": list(reversed(TEAMS_BOT_EVENT_LOGS[-50:])),
     })
 
 @app.route("/extract-date", methods=["POST"])
