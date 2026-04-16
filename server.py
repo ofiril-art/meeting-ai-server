@@ -1173,7 +1173,6 @@ def teams_bot_calling_webhook():
 
     if session:
         bot_events = session.setdefault("bot_events", [])
-                bot_events = session.setdefault("bot_events", [])
         bot_events.append({
             "event_id": event["event_id"],
             "received_at": event["received_at"],
