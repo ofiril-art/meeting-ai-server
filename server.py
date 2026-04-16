@@ -591,10 +591,57 @@ def build_zoom_prepare_response(session):
     }
 
 
+def apply_zoom_session_updates(session: dict, **updates):
+    for key, value in updates.items():
+        session[key] = value
+    session["updated_at"] = utc_now_iso()
+    return session
+
+
+
+def refresh_zoom_session(session: dict):
+    return update_mock_zoom_session_status(session)
+
+
+
+def start_zoom_bot_for_session(session: dict):
+    current_status = (session.get("status") or "").strip().lower()
+    current_job_state = (session.get("job_state") or "").strip().lower()
+
+    if current_status == "stopped":
+        raise ValueError("Session already stopped")
+
+    if current_job_state in {"start_requested", "joining", "recording"}:
+        return session
+
+    return apply_zoom_session_updates(
+        session,
+        job_state="start_requested",
+        last_error=None,
+    )
+
+
+
+def stop_zoom_bot_for_session(session: dict):
+    now = utc_now_iso()
+    return apply_zoom_session_updates(
+        session,
+        status="stopped",
+        job_state="stopped",
+        stopped_at=now,
+        last_error=None,
+    )
+
+
 
 def update_mock_zoom_session_status(session):
     current_status = (session.get("status") or "").strip().lower()
+    current_job_state = (session.get("job_state") or "").strip().lower()
+
     if current_status == "stopped":
+        return session
+
+    if current_job_state in {"joining", "recording", "failed"}:
         return session
 
     received_at = session.get("received_at") or ""
@@ -607,20 +654,36 @@ def update_mock_zoom_session_status(session):
     now = datetime.now(timezone.utc)
     elapsed_seconds = max(0, int((now - received_dt).total_seconds()))
 
-    if elapsed_seconds < 10:
-        session["status"] = "queued"
-        session["job_state"] = "created"
+    if current_job_state == "start_requested" and elapsed_seconds < 10:
+        return apply_zoom_session_updates(
+            session,
+            status="queued",
+            job_state="start_requested",
+            last_error=None,
+        )
+    elif elapsed_seconds < 10:
+        return apply_zoom_session_updates(
+            session,
+            status="queued",
+            job_state="created",
+            last_error=None,
+        )
     elif elapsed_seconds < 20:
-        session["status"] = "bot_joining"
-        session["job_state"] = "joining"
-        session["started_at"] = session.get("started_at") or utc_now_iso()
+        return apply_zoom_session_updates(
+            session,
+            status="bot_joining",
+            job_state="joining",
+            started_at=session.get("started_at") or utc_now_iso(),
+            last_error=None,
+        )
     else:
-        session["status"] = "recording"
-        session["job_state"] = "recording"
-        session["started_at"] = session.get("started_at") or utc_now_iso()
-
-    session["updated_at"] = utc_now_iso()
-    return session
+        return apply_zoom_session_updates(
+            session,
+            status="recording",
+            job_state="recording",
+            started_at=session.get("started_at") or utc_now_iso(),
+            last_error=None,
+        )
 
 
 def update_mock_teams_session_status(session):
@@ -1395,12 +1458,32 @@ def get_zoom_session(session_id):
     if not session:
         return jsonify({"ok": False, "error": "Session not found"}), 404
 
-    session = update_mock_zoom_session_status(session)
+    session = refresh_zoom_session(session)
 
     print(f"🔄 Zoom session status refresh: {session_id} -> {session['status']} ({session.get('job_state')})", flush=True)
 
     return jsonify({
         "ok": True,
+        "session": session
+    })
+
+@app.route("/zoom/session/<session_id>/start-bot", methods=["POST"])
+def start_zoom_session_bot(session_id):
+    session = ZOOM_SESSIONS.get(session_id)
+
+    if not session:
+        return jsonify({"ok": False, "error": "Session not found"}), 404
+
+    try:
+        session = start_zoom_bot_for_session(session)
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+
+    print(f"🚀 Zoom start-bot requested: {session_id} ({session.get('job_state')})", flush=True)
+
+    return jsonify({
+        "ok": True,
+        "message": "Zoom bot start request accepted.",
         "session": session
     })
 
@@ -1412,11 +1495,7 @@ def stop_zoom_session(session_id):
     if not session:
         return jsonify({"ok": False, "error": "Session not found"}), 404
 
-    now = utc_now_iso()
-    session["status"] = "stopped"
-    session["job_state"] = "stopped"
-    session["updated_at"] = now
-    session["stopped_at"] = now
+    session = stop_zoom_bot_for_session(session)
 
     print(f"🛑 Zoom session stopped: {session_id}", flush=True)
 
