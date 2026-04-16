@@ -9,7 +9,7 @@ import requests
 from bs4 import BeautifulSoup
 from openai import OpenAI
 
-app = Flask(__name__) 
+app = Flask(__name__)
 
 TEAMS_HOST_PATTERNS = {
     "teams.microsoft.com",
@@ -1156,11 +1156,40 @@ def teams_bot_calling_webhook():
     }), 202
 
 
+
 @app.route("/teams/events", methods=["GET"])
 def list_teams_bot_events():
     return jsonify({
         "ok": True,
         "events": list(reversed(TEAMS_BOT_EVENT_LOGS[-50:])),
+    })
+
+
+# Per-session Teams events endpoint
+@app.route("/teams/session/<session_id>/events", methods=["GET"])
+def list_teams_session_events(session_id):
+    session = TEAMS_SESSIONS.get(session_id)
+
+    if not session:
+        return jsonify({"ok": False, "error": "Session not found"}), 404
+
+    session_event_refs = list(reversed(session.get("bot_events", [])[-50:]))
+    session_event_ids = {
+        item.get("event_id")
+        for item in session_event_refs
+        if isinstance(item, dict) and item.get("event_id")
+    }
+
+    detailed_events = [
+        event for event in reversed(TEAMS_BOT_EVENT_LOGS[-200:])
+        if event.get("event_id") in session_event_ids
+    ]
+
+    return jsonify({
+        "ok": True,
+        "session_id": session_id,
+        "events": detailed_events,
+        "event_refs": session_event_refs,
     })
 
 @app.route("/extract-date", methods=["POST"])
