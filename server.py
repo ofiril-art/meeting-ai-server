@@ -19,6 +19,7 @@ TEAMS_SESSIONS = {}
 TEAMS_BOT_MODE = "mock"
 TEAMS_JOB_STATES_ACTIVE = {"created", "start_requested", "booting_bot", "joining_meeting", "recording"}
 TEAMS_BOT_EVENT_LOGS = []
+TEAMS_STATE_FILE = os.getenv("TEAMS_STATE_FILE", "teams_state.json")
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
@@ -233,12 +234,48 @@ def is_valid_teams_url(url: str) -> bool:
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
+def load_teams_state():
+    global TEAMS_SESSIONS, TEAMS_BOT_EVENT_LOGS
+
+    if not os.path.exists(TEAMS_STATE_FILE):
+        return
+
+    try:
+        with open(TEAMS_STATE_FILE, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+
+        sessions = payload.get("sessions") or {}
+        events = payload.get("events") or []
+
+        if isinstance(sessions, dict):
+            TEAMS_SESSIONS = sessions
+        if isinstance(events, list):
+            TEAMS_BOT_EVENT_LOGS = events
+
+        print(f"📦 Loaded Teams state: {len(TEAMS_SESSIONS)} sessions, {len(TEAMS_BOT_EVENT_LOGS)} events", flush=True)
+    except Exception as e:
+        print(f"❌ Failed loading Teams state: {e}", flush=True)
+
+
+def save_teams_state():
+    try:
+        payload = {
+            "sessions": TEAMS_SESSIONS,
+            "events": TEAMS_BOT_EVENT_LOGS[-200:],
+            "saved_at": utc_now_iso(),
+        }
+
+        with open(TEAMS_STATE_FILE, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"❌ Failed saving Teams state: {e}", flush=True)
 
 
 def apply_teams_session_updates(session: dict, **updates):
     for key, value in updates.items():
         session[key] = value
     session["updated_at"] = utc_now_iso()
+    save_teams_state()
     return session
 
 
@@ -254,6 +291,7 @@ def append_teams_bot_event(event_type: str, payload=None, session_id: str | None
     TEAMS_BOT_EVENT_LOGS.append(entry)
     if len(TEAMS_BOT_EVENT_LOGS) > 200:
         del TEAMS_BOT_EVENT_LOGS[:-200]
+    save_teams_state()
     return entry
 
 
@@ -445,6 +483,7 @@ def create_teams_session_record(meeting_name: str, teams_url: str):
     }
 
     TEAMS_SESSIONS[session_id] = session
+    save_teams_state()
     return session
 
 
@@ -524,7 +563,7 @@ def update_mock_teams_session_status(session):
             last_error=None,
         )
 
-
+load_teams_state()
 @app.route("/transcribe", methods=["POST"])
 def transcribe():
     temp_path = None
@@ -1134,6 +1173,7 @@ def teams_bot_calling_webhook():
 
     if session:
         bot_events = session.setdefault("bot_events", [])
+                bot_events = session.setdefault("bot_events", [])
         bot_events.append({
             "event_id": event["event_id"],
             "received_at": event["received_at"],
@@ -1141,6 +1181,7 @@ def teams_bot_calling_webhook():
         })
         if len(bot_events) > 50:
             del bot_events[:-50]
+        save_teams_state()
 
         update_session_from_calling_event(session, payload if isinstance(payload, dict) else {})
         print(f"📞 /api/calling webhook matched session: {session.get('session_id')}", flush=True)
