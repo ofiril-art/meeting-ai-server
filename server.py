@@ -197,6 +197,25 @@ def add_readable_paragraphs(text: str) -> str:
     return "\n\n".join(paragraphs).strip()
 
 
+# Helper: build analysis input for meeting analysis (head + tail, with truncation marker)
+def build_analysis_input(text: str, max_chars: int = 50000) -> str:
+    text = (text or "").strip()
+    if len(text) <= max_chars:
+        return text
+
+    head_target = max_chars // 2
+    tail_target = max_chars - head_target
+
+    head = text[:head_target].rstrip()
+    tail = text[-tail_target:].lstrip()
+
+    return (
+        head
+        + "\n\n[... transcript truncated for analysis due to length ...]\n\n"
+        + tail
+    ).strip()
+
+
 def json_from_text(text: str):
     text = (text or "").strip()
 
@@ -896,6 +915,11 @@ def transcribe():
         cleaned_text = basic_cleanup(raw_text)
         cleaned_text = fix_mixed_text(cleaned_text)
         formatted_text = add_readable_paragraphs(cleaned_text)
+        analysis_input = build_analysis_input(formatted_text)
+
+        print(f"📝 Raw transcript chars: {len(raw_text)}", flush=True)
+        print(f"📝 Formatted transcript chars: {len(formatted_text)}", flush=True)
+        print(f"📝 Analysis input chars: {len(analysis_input)}", flush=True)
 
         # 🔒 Guard: avoid AI when transcript too short / weak
         if len(formatted_text.strip()) < 50:
@@ -915,6 +939,7 @@ def transcribe():
                 }
             })
 
+        print("🧠 Starting meeting analysis generation", flush=True)
         summary_response = client.responses.create(
             model="gpt-4.1-mini",
             input=[
@@ -968,12 +993,14 @@ Additional instructions:
                 },
                 {
                     "role": "user",
-                    "content": formatted_text
+                    "content": analysis_input
                 }
             ]
         )
+        print("✅ Meeting analysis generation completed", flush=True)
 
         try:
+            print("🧩 Parsing meeting analysis JSON", flush=True)
             parsed = json_from_text(summary_response.output_text)
             normalized = normalize_meeting_analysis(parsed)
             summary_text = normalized["summary"]
@@ -981,7 +1008,10 @@ Additional instructions:
             speakers = normalized["speakers"]
             action_items_by_speaker = normalized["action_items_by_speaker"]
             meeting_dynamics = normalized["meeting_dynamics"]
-        except Exception:
+            print(f"✅ Parsed meeting analysis successfully. Summary chars: {len(summary_text)}, action items: {len(action_items)}", flush=True)
+        except Exception as parse_error:
+            print(f"❌ Failed to parse meeting analysis JSON: {parse_error}", flush=True)
+            print(f"Raw analysis output: {summary_response.output_text}", flush=True)
             summary_text = ""
             action_items = []
             speakers = []
@@ -993,6 +1023,7 @@ Additional instructions:
                 "key_tensions": []
             }
 
+        print("📤 Returning transcription response to client", flush=True)
         return jsonify({
             "raw_text": raw_text,
             "text": formatted_text,
