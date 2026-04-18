@@ -36,10 +36,13 @@ ZOOM_HOST_PATTERNS = {
 ZOOM_SESSIONS = {}
 
 
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+client = OpenAI(
+    api_key=os.getenv("OPENAI_API_KEY"),
+    timeout=600.0,
+)
 
 
-TRANSCRIPTION_CHUNK_SECONDS = int(os.getenv("TRANSCRIPTION_CHUNK_SECONDS", "480"))
+TRANSCRIPTION_CHUNK_SECONDS = int(os.getenv("TRANSCRIPTION_CHUNK_SECONDS", "180"))
 FFMPEG_AUDIO_RATE = os.getenv("FFMPEG_AUDIO_RATE", "16000")
 FFMPEG_AUDIO_CHANNELS = os.getenv("FFMPEG_AUDIO_CHANNELS", "1")
 
@@ -120,11 +123,19 @@ def transcribe_with_chunking(input_path: str):
 
         chunk_texts = []
         for index, chunk_path in enumerate(chunk_paths, start=1):
-            print(f"🎙️ Transcribing chunk {index}/{len(chunk_paths)}: {os.path.basename(chunk_path)}", flush=True)
+            chunk_size = os.path.getsize(chunk_path) if os.path.exists(chunk_path) else 0
+            print(
+                f"🎙️ Transcribing chunk {index}/{len(chunk_paths)}: {os.path.basename(chunk_path)} ({chunk_size} bytes)",
+                flush=True,
+            )
             chunk_text = transcribe_audio_file_with_openai(chunk_path)
             if chunk_text:
                 chunk_texts.append(chunk_text.strip())
 
+        print(
+            f"✅ Completed chunked transcription with {len(chunk_texts)} successful chunks out of {len(chunk_paths)}",
+            flush=True,
+        )
         return "\n\n".join(chunk_texts).strip()
     finally:
         for path in glob.glob(os.path.join(working_dir, "*")):
