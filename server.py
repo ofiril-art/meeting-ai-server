@@ -5,6 +5,8 @@ import os
 import re
 import json
 import tempfile
+import subprocess
+import glob
 import requests
 from bs4 import BeautifulSoup
 from openai import OpenAI
@@ -33,7 +35,107 @@ ZOOM_HOST_PATTERNS = {
 }
 ZOOM_SESSIONS = {}
 
+
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+
+TRANSCRIPTION_CHUNK_SECONDS = int(os.getenv("TRANSCRIPTION_CHUNK_SECONDS", "480"))
+FFMPEG_AUDIO_RATE = os.getenv("FFMPEG_AUDIO_RATE", "16000")
+FFMPEG_AUDIO_CHANNELS = os.getenv("FFMPEG_AUDIO_CHANNELS", "1")
+
+
+def run_ffmpeg_command(args):
+    completed = subprocess.run(
+        args,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    if completed.returncode != 0:
+        raise RuntimeError(completed.stderr.strip() or "ffmpeg command failed")
+    return completed
+
+
+def normalize_audio_for_transcription(input_path: str, output_path: str):
+    run_ffmpeg_command([
+        "ffmpeg",
+        "-y",
+        "-i", input_path,
+        "-vn",
+        "-ac", FFMPEG_AUDIO_CHANNELS,
+        "-ar", FFMPEG_AUDIO_RATE,
+        "-c:a", "pcm_s16le",
+        output_path,
+    ])
+
+
+def split_audio_into_chunks(input_path: str, output_dir: str, chunk_seconds: int):
+    pattern = os.path.join(output_dir, "chunk_%03d.wav")
+    run_ffmpeg_command([
+        "ffmpeg",
+        "-y",
+        "-i", input_path,
+        "-f", "segment",
+        "-segment_time", str(chunk_seconds),
+        "-c", "copy",
+        pattern,
+    ])
+    return sorted(glob.glob(os.path.join(output_dir, "chunk_*.wav")))
+
+
+def transcribe_audio_file_with_openai(audio_path: str):
+    with open(audio_path, "rb") as audio_file:
+        transcription = client.audio.transcriptions.create(
+            model="gpt-4o-transcribe",
+            file=audio_file,
+            prompt="""
+This is a business meeting that may include Hebrew and English.
+
+Rules:
+- Keep Hebrew in Hebrew.
+- Keep English EXACTLY as spoken (do not translate English words).
+- If a word was spoken in English, keep it in English.
+- Do NOT replace English terms with Hebrew equivalents.
+- Preserve natural sentence flow.
+- Keep mixed-language sentences intact.
+"""
+        )
+    return (transcription.text or "").strip()
+
+
+def transcribe_with_chunking(input_path: str):
+    working_dir = tempfile.mkdtemp(prefix="transcribe_chunks_")
+    normalized_path = os.path.join(working_dir, "normalized.wav")
+
+    try:
+        normalize_audio_for_transcription(input_path, normalized_path)
+        chunk_paths = split_audio_into_chunks(
+            normalized_path,
+            working_dir,
+            TRANSCRIPTION_CHUNK_SECONDS,
+        )
+
+        if not chunk_paths:
+            chunk_paths = [normalized_path]
+
+        chunk_texts = []
+        for index, chunk_path in enumerate(chunk_paths, start=1):
+            print(f"🎙️ Transcribing chunk {index}/{len(chunk_paths)}: {os.path.basename(chunk_path)}", flush=True)
+            chunk_text = transcribe_audio_file_with_openai(chunk_path)
+            if chunk_text:
+                chunk_texts.append(chunk_text.strip())
+
+        return "\n\n".join(chunk_texts).strip()
+    finally:
+        for path in glob.glob(os.path.join(working_dir, "*")):
+            try:
+                os.remove(path)
+            except Exception:
+                pass
+        try:
+            os.rmdir(working_dir)
+        except Exception:
+            pass
 
 
 def basic_cleanup(text: str) -> str:
@@ -757,6 +859,7 @@ def transcribe():
             return jsonify({"error": "No file uploaded"}), 400
 
         uploaded_file = request.files["file"]
+        print(f"📥 Uploaded file received: {uploaded_file.filename}", flush=True)
 
         if uploaded_file.filename == "":
             return jsonify({"error": "Empty filename"}), 400
@@ -766,25 +869,19 @@ def transcribe():
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_file:
             uploaded_file.save(temp_file.name)
             temp_path = temp_file.name
+        try:
+            temp_size = os.path.getsize(temp_path)
+            print(f"📦 Saved upload to temp file: {temp_path} ({temp_size} bytes)", flush=True)
+        except Exception:
+            print(f"📦 Saved upload to temp file: {temp_path}", flush=True)
 
-        with open(temp_path, "rb") as audio_file:
-            transcription = client.audio.transcriptions.create(
-                model="gpt-4o-transcribe",
-                file=audio_file,
-                prompt="""
-This is a business meeting that may include Hebrew and English.
-
-Rules:
-- Keep Hebrew in Hebrew.
-- Keep English EXACTLY as spoken (do not translate English words).
-- If a word was spoken in English, keep it in English.
-- Do NOT replace English terms with Hebrew equivalents.
-- Preserve natural sentence flow.
-- Keep mixed-language sentences intact.
-"""
-            )
-
-        raw_text = (transcription.text or "").strip()
+        try:
+            raw_text = transcribe_with_chunking(temp_path)
+        except Exception as chunk_error:
+            print(f"❌ Chunked transcription failed: {chunk_error}", flush=True)
+            return jsonify({
+                "error": f"Chunked transcription failed: {str(chunk_error)}"
+            }), 500
         cleaned_text = basic_cleanup(raw_text)
         cleaned_text = fix_mixed_text(cleaned_text)
         formatted_text = add_readable_paragraphs(cleaned_text)
