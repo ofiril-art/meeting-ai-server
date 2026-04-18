@@ -305,6 +305,110 @@ def normalize_meeting_analysis(parsed):
     }
 
 
+# --- Robust meeting-analysis parsing helpers ---
+def repair_analysis_json(raw_output: str) -> str:
+    repaired = client.responses.create(
+        model="gpt-4.1-mini",
+        input=[
+            {
+                "role": "system",
+                "content": """
+You receive malformed or noisy meeting-analysis output.
+Your job is to convert it into VALID JSON ONLY.
+
+Return ONLY valid JSON with this exact structure:
+{
+  "summary": "string",
+  "action_items": ["string"],
+  "speakers": [
+    {
+      "speaker": "string",
+      "role_hint": "string",
+      "highlights": ["string"]
+    }
+  ],
+  "action_items_by_speaker": [
+    {
+      "speaker": "string",
+      "items": ["string"]
+    }
+  ],
+  "meeting_dynamics": {
+    "communication_style": "string",
+    "decision_pattern": "string",
+    "alignment_level": "string",
+    "key_tensions": ["string"]
+  }
+}
+
+Rules:
+- Preserve the meaning from the original output.
+- Do not invent facts.
+- If a field is missing, use an empty string or empty list.
+- Return JSON only. No markdown. No explanation.
+"""
+            },
+            {
+                "role": "user",
+                "content": raw_output or ""
+            }
+        ]
+    )
+    return (repaired.output_text or "").strip()
+
+
+def generate_fallback_meeting_analysis_from_transcript(transcript_text: str) -> dict:
+    fallback_response = client.responses.create(
+        model="gpt-4.1-mini",
+        input=[
+            {
+                "role": "system",
+                "content": """
+Generate a conservative meeting analysis from a transcript.
+Return ONLY valid JSON with this exact structure:
+{
+  "summary": "string",
+  "action_items": ["string"],
+  "speakers": [
+    {
+      "speaker": "string",
+      "role_hint": "string",
+      "highlights": ["string"]
+    }
+  ],
+  "action_items_by_speaker": [
+    {
+      "speaker": "string",
+      "items": ["string"]
+    }
+  ],
+  "meeting_dynamics": {
+    "communication_style": "string",
+    "decision_pattern": "string",
+    "alignment_level": "string",
+    "key_tensions": ["string"]
+  }
+}
+
+Rules:
+- Respond in Hebrew.
+- Keep English business and product terms in English if they appear that way in the transcript.
+- Be conservative.
+- Do not invent facts, owners, or decisions.
+- If something is unclear, leave it empty.
+- Return JSON only.
+"""
+            },
+            {
+                "role": "user",
+                "content": transcript_text or ""
+            }
+        ]
+    )
+    parsed = json_from_text(fallback_response.output_text)
+    return normalize_meeting_analysis(parsed)
+
+
 # Helper to fetch text from a link, for link attachments
 def fetch_link_text(url: str, max_chars: int = 4000) -> str:
     url = (url or "").strip()
@@ -1012,16 +1116,43 @@ Additional instructions:
         except Exception as parse_error:
             print(f"❌ Failed to parse meeting analysis JSON: {parse_error}", flush=True)
             print(f"Raw analysis output: {summary_response.output_text}", flush=True)
-            summary_text = ""
-            action_items = []
-            speakers = []
-            action_items_by_speaker = []
-            meeting_dynamics = {
-                "communication_style": "",
-                "decision_pattern": "",
-                "alignment_level": "",
-                "key_tensions": []
-            }
+
+            try:
+                print("🛠️ Attempting to repair malformed meeting analysis JSON", flush=True)
+                repaired_output = repair_analysis_json(summary_response.output_text)
+                print(f"🛠️ Repaired analysis output: {repaired_output}", flush=True)
+                repaired_parsed = json_from_text(repaired_output)
+                normalized = normalize_meeting_analysis(repaired_parsed)
+                summary_text = normalized["summary"]
+                action_items = normalized["action_items"]
+                speakers = normalized["speakers"]
+                action_items_by_speaker = normalized["action_items_by_speaker"]
+                meeting_dynamics = normalized["meeting_dynamics"]
+                print(f"✅ Repaired meeting analysis successfully. Summary chars: {len(summary_text)}, action items: {len(action_items)}", flush=True)
+            except Exception as repair_error:
+                print(f"❌ Failed to repair meeting analysis JSON: {repair_error}", flush=True)
+
+                try:
+                    print("🧯 Generating fallback meeting analysis from transcript", flush=True)
+                    normalized = generate_fallback_meeting_analysis_from_transcript(analysis_input)
+                    summary_text = normalized["summary"]
+                    action_items = normalized["action_items"]
+                    speakers = normalized["speakers"]
+                    action_items_by_speaker = normalized["action_items_by_speaker"]
+                    meeting_dynamics = normalized["meeting_dynamics"]
+                    print(f"✅ Fallback meeting analysis completed. Summary chars: {len(summary_text)}, action items: {len(action_items)}", flush=True)
+                except Exception as fallback_error:
+                    print(f"❌ Fallback meeting analysis also failed: {fallback_error}", flush=True)
+                    summary_text = ""
+                    action_items = []
+                    speakers = []
+                    action_items_by_speaker = []
+                    meeting_dynamics = {
+                        "communication_style": "",
+                        "decision_pattern": "",
+                        "alignment_level": "",
+                        "key_tensions": []
+                    }
 
         print("📤 Returning transcription response to client", flush=True)
         return jsonify({
