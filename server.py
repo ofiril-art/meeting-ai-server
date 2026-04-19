@@ -259,6 +259,57 @@ def clean_hebrew_transcript(text: str) -> str:
     return text.strip()
 
 
+# --- Hebrew transcript AI repair helpers ---
+def contains_hebrew(text: str) -> bool:
+    return bool(text) and re.search(r"[\u0590-\u05FF]", text) is not None
+
+
+def repair_hebrew_transcript_with_ai(text: str, max_chars: int = 18000) -> str:
+    text = (text or "").strip()
+    if not text:
+        return ""
+
+    if not contains_hebrew(text):
+        return text
+
+    trimmed = text[:max_chars].strip()
+
+    response = client.responses.create(
+        model="gpt-4.1-mini",
+        input=[
+            {
+                "role": "system",
+                "content": """
+You repair Hebrew ASR transcript text.
+
+Goals:
+- Fix obvious Hebrew transcription mistakes.
+- Fix obvious place names, person names, numbers, and planning/policy terms when they are strongly implied by the text.
+- Preserve the original meaning and structure.
+- Keep the response in Hebrew.
+- Keep English terms in English if they were spoken that way.
+- Do NOT summarize.
+- Do NOT rewrite stylistically.
+- Do NOT invent facts, sentences, names, numbers, or sections that are not strongly supported by the original transcript.
+- Do NOT add introductions, explanations, markdown, or quotation marks.
+- Return only the repaired transcript text.
+
+Be conservative:
+- Only fix clear ASR mistakes.
+- If unsure, keep the original wording.
+"""
+            },
+            {
+                "role": "user",
+                "content": trimmed
+            }
+        ]
+    )
+
+    repaired = (response.output_text or "").strip()
+    return repaired or text
+
+
 def add_readable_paragraphs(text: str) -> str:
     if not text:
         return ""
@@ -1107,6 +1158,16 @@ def transcribe():
         cleaned_text = basic_cleanup(raw_text)
         cleaned_text = fix_mixed_text(cleaned_text)
         cleaned_text = clean_hebrew_transcript(cleaned_text)
+
+        if contains_hebrew(cleaned_text) and len(cleaned_text) >= 1200:
+            print("🛠️ Starting AI Hebrew transcript repair", flush=True)
+            try:
+                cleaned_text = repair_hebrew_transcript_with_ai(cleaned_text)
+                cleaned_text = clean_hebrew_transcript(cleaned_text)
+                print("✅ AI Hebrew transcript repair completed", flush=True)
+            except Exception as transcript_repair_error:
+                print(f"❌ AI Hebrew transcript repair failed: {transcript_repair_error}", flush=True)
+
         formatted_text = add_readable_paragraphs(cleaned_text)
         analysis_input = build_analysis_input(formatted_text)
 
@@ -1114,6 +1175,7 @@ def transcribe():
         print(f"📝 Formatted transcript chars: {len(formatted_text)}", flush=True)
         print(f"📝 Analysis input chars: {len(analysis_input)}", flush=True)
         print(f"🧹 Cleaned transcript chars: {len(cleaned_text)}", flush=True)
+        print(f"🧾 Final transcript chars after repair: {len(formatted_text)}", flush=True)
 
         # 🔒 Guard: avoid AI when transcript too short / weak
         if len(formatted_text.strip()) < 50:
