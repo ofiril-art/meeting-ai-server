@@ -264,15 +264,57 @@ def contains_hebrew(text: str) -> bool:
     return bool(text) and re.search(r"[\u0590-\u05FF]", text) is not None
 
 
-def repair_hebrew_transcript_with_ai(text: str, max_chars: int = 18000) -> str:
+
+def split_text_for_ai_repair(text: str, max_chars: int = 5000) -> list[str]:
+    text = (text or "").strip()
+    if not text:
+        return []
+
+    paragraphs = [p.strip() for p in re.split(r"\n{2,}", text) if p.strip()]
+    if not paragraphs:
+        paragraphs = [text]
+
+    chunks = []
+    current = ""
+
+    for paragraph in paragraphs:
+        candidate = f"{current}\n\n{paragraph}".strip() if current else paragraph
+        if len(candidate) <= max_chars:
+            current = candidate
+            continue
+
+        if current:
+            chunks.append(current.strip())
+            current = ""
+
+        if len(paragraph) <= max_chars:
+            current = paragraph
+            continue
+
+        sentence_parts = re.split(r"(?<=[.!?])\s+", paragraph)
+        sentence_parts = [s.strip() for s in sentence_parts if s.strip()]
+
+        sentence_chunk = ""
+        for sentence in sentence_parts:
+            sentence_candidate = f"{sentence_chunk} {sentence}".strip() if sentence_chunk else sentence
+            if len(sentence_candidate) <= max_chars:
+                sentence_chunk = sentence_candidate
+            else:
+                if sentence_chunk:
+                    chunks.append(sentence_chunk.strip())
+                sentence_chunk = sentence
+        if sentence_chunk:
+            chunks.append(sentence_chunk.strip())
+    if current:
+        chunks.append(current.strip())
+
+    return [chunk for chunk in chunks if chunk]
+
+
+def repair_hebrew_transcript_chunk_with_ai(text: str) -> str:
     text = (text or "").strip()
     if not text:
         return ""
-
-    if not contains_hebrew(text):
-        return text
-
-    trimmed = text[:max_chars].strip()
 
     response = client.responses.create(
         model="gpt-4.1-mini",
@@ -301,13 +343,33 @@ Be conservative:
             },
             {
                 "role": "user",
-                "content": trimmed
+                "content": text
             }
         ]
     )
 
     repaired = (response.output_text or "").strip()
     return repaired or text
+
+
+def repair_hebrew_transcript_with_ai(text: str, max_chars: int = 5000) -> str:
+    text = (text or "").strip()
+    if not text:
+        return ""
+
+    if not contains_hebrew(text):
+        return text
+
+    chunks = split_text_for_ai_repair(text, max_chars=max_chars)
+    if not chunks:
+        return text
+
+    repaired_chunks = []
+    for index, chunk in enumerate(chunks, start=1):
+        print(f"🛠️ Repairing Hebrew transcript chunk {index}/{len(chunks)}", flush=True)
+        repaired_chunks.append(repair_hebrew_transcript_chunk_with_ai(chunk))
+
+    return "\n\n".join(chunk.strip() for chunk in repaired_chunks if chunk.strip()).strip() or text
 
 
 def add_readable_paragraphs(text: str) -> str:
@@ -1162,7 +1224,7 @@ def transcribe():
         if contains_hebrew(cleaned_text) and len(cleaned_text) >= 1200:
             print("🛠️ Starting AI Hebrew transcript repair", flush=True)
             try:
-                cleaned_text = repair_hebrew_transcript_with_ai(cleaned_text)
+                cleaned_text = repair_hebrew_transcript_with_ai(cleaned_text, max_chars=5000)
                 cleaned_text = clean_hebrew_transcript(cleaned_text)
                 print("✅ AI Hebrew transcript repair completed", flush=True)
             except Exception as transcript_repair_error:
