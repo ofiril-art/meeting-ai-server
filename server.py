@@ -161,6 +161,7 @@ def basic_cleanup(text: str) -> str:
     return result.strip()
 
 
+
 def fix_mixed_text(text: str) -> str:
     if not text:
         return ""
@@ -168,6 +169,93 @@ def fix_mixed_text(text: str) -> str:
     text = re.sub(r"([א-ת])([A-Za-z])", r"\1 \2", text)
     text = re.sub(r"([A-Za-z])([א-ת])", r"\1 \2", text)
     text = re.sub(r"\s{2,}", " ", text)
+    return text.strip()
+
+
+# --- Hebrew transcript cleanup, entity correction, and promo/ad stripping helpers ---
+def apply_phrase_replacements(text: str) -> str:
+    if not text:
+        return ""
+
+    replacements = [
+        ("שר השיקון", "שר השיכון"),
+        ("גולד קנופף", "גולדקנופף"),
+        ("גולד קנופ", "גולדקנופף"),
+        ("טילה", "תילה"),
+        ("חורבת טילה", "חורבת תילה"),
+        ("איילד שקד", "איילת שקד"),
+        ("הילד שקד", "איילת שקד"),
+        ("מערעת", "מרהט"),
+        ("דרום הערבי", "דרום־מערבי"),
+        ("בר שבע", "באר שבע"),
+        ("בער שבע", "באר שבע"),
+        ("מודיעין אילית", "מודיעין עילית"),
+        ("ביתר אילית", "ביתר עילית"),
+        ("היהרות הפיתוח", "עיירות הפיתוח"),
+        ("חריגות בנייה", "חריגות בנייה"),
+        ("חגוגות בנייה", "חריגות בנייה"),
+        ("הר המסע", "הר עמשא"),
+        ("לבנה", "ליבנה"),
+        ("יאטה", "יאטא"),
+        ("הולנטה", "הולנת\"ע"),
+        ("המועצה הארצית לתכנון ובנייה", "המועצה הארצית לתכנון ולבנייה"),
+        ("תמה 35", 'תמ"א 35'),
+        ("מטר רבוע", "מטר רבוע"),
+        ("פי שניים", "פי שניים"),
+        ("העסוקה", "תעסוקה"),
+    ]
+
+    for wrong, correct in replacements:
+        text = text.replace(wrong, correct)
+
+    text = re.sub(r"\b20 קילומטרים מערהט\b", "20 קילומטרים מרהט", text)
+    text = re.sub(r"\b20 קילומטרים מערעת\b", "20 קילומטרים מרהט", text)
+    text = re.sub(r"\b25 קילומטרים מבאר שבע\b", "25 קילומטרים מבאר שבע", text)
+    text = re.sub(r"\b50 אלף דירות ו-80 עד 100 אלף תושבים\b", "50 אלף דירות ו־80–100 אלף תושבים", text)
+    text = re.sub(r"\b7 אחוזים בשנה\b", "7% בשנה", text)
+    text = re.sub(r"\b70 אלף שקלים למטר רבוע\b", "70 אלף שקל למ\"ר", text)
+    text = re.sub(r"\b200 אלף יחידות דיור\b", "200 אלף יחידות דיור", text)
+
+    return text
+
+
+def strip_trailing_promos(text: str) -> str:
+    if not text:
+        return ""
+
+    promo_markers = [
+        "הכותב הוא",
+        "פצועי צה\"ל",
+        "פצועות צה\"ל",
+        "נפש אחת",
+        "קו הסיוע והתמיכה",
+        "מכל הלב לכל החיים",
+    ]
+
+    earliest_index = None
+    for marker in promo_markers:
+        index = text.find(marker)
+        if index != -1 and (earliest_index is None or index < earliest_index):
+            earliest_index = index
+
+    if earliest_index is not None:
+        text = text[:earliest_index].rstrip()
+
+    return text.strip()
+
+
+def clean_hebrew_transcript(text: str) -> str:
+    if not text:
+        return ""
+
+    text = apply_phrase_replacements(text)
+    text = strip_trailing_promos(text)
+    text = re.sub(r"\bשתיים\.\s*נתחיל בהתחלה\.\b", "2. נתחיל בהתחלה.", text)
+    text = re.sub(r"\bשלוש\.\s*החברה החרדית\b", "3. החברה החרדית", text)
+    text = re.sub(r"\bארבע\.\s*מצוקת הדיור\b", "4. מצוקת הדיור", text)
+    text = re.sub(r"\bחמש\.\s*וזה כבר\b", "5. וזה כבר", text)
+    text = re.sub(r"\s{2,}", " ", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
 
 
@@ -1018,12 +1106,14 @@ def transcribe():
             }), 500
         cleaned_text = basic_cleanup(raw_text)
         cleaned_text = fix_mixed_text(cleaned_text)
+        cleaned_text = clean_hebrew_transcript(cleaned_text)
         formatted_text = add_readable_paragraphs(cleaned_text)
         analysis_input = build_analysis_input(formatted_text)
 
         print(f"📝 Raw transcript chars: {len(raw_text)}", flush=True)
         print(f"📝 Formatted transcript chars: {len(formatted_text)}", flush=True)
         print(f"📝 Analysis input chars: {len(analysis_input)}", flush=True)
+        print(f"🧹 Cleaned transcript chars: {len(cleaned_text)}", flush=True)
 
         # 🔒 Guard: avoid AI when transcript too short / weak
         if len(formatted_text.strip()) < 50:
