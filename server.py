@@ -154,6 +154,60 @@ Rules:
     return (transcription.text or "").strip()
 
 
+# --- Chunk overlap deduplication helpers ---
+def normalize_text_for_dedup(text: str) -> str:
+    text = (text or "").strip().lower()
+    if not text:
+        return ""
+    text = re.sub(r"\s+", " ", text)
+    text = re.sub(r"[\u200f\u200e\-–—\"'“”׳״,.;:!?()\[\]{}]", "", text)
+    return text.strip()
+
+
+def sentence_split_for_dedup(text: str) -> list[str]:
+    text = (text or "").strip()
+    if not text:
+        return []
+
+    parts = re.split(r"(?<=[.!?])\s+|\n{2,}", text)
+    return [part.strip() for part in parts if part and part.strip()]
+
+
+def deduplicate_overlap_between_chunks(chunk_texts: list[str], max_overlap_sentences: int = 6) -> str:
+    if not chunk_texts:
+        return ""
+
+    merged_sentences: list[str] = []
+
+    for chunk_text in chunk_texts:
+        chunk_sentences = sentence_split_for_dedup(chunk_text)
+        if not chunk_sentences:
+            continue
+
+        if not merged_sentences:
+            merged_sentences.extend(chunk_sentences)
+            continue
+
+        overlap_to_skip = 0
+        max_check = min(max_overlap_sentences, len(merged_sentences), len(chunk_sentences))
+
+        for size in range(max_check, 0, -1):
+            tail = merged_sentences[-size:]
+            head = chunk_sentences[:size]
+
+            tail_norm = [normalize_text_for_dedup(item) for item in tail]
+            head_norm = [normalize_text_for_dedup(item) for item in head]
+
+            if tail_norm == head_norm:
+                overlap_to_skip = size
+                break
+
+        merged_sentences.extend(chunk_sentences[overlap_to_skip:])
+
+    deduped = "\n\n".join(sentence.strip() for sentence in merged_sentences if sentence.strip()).strip()
+    return deduped
+
+
 def transcribe_with_chunking(input_path: str):
     working_dir = tempfile.mkdtemp(prefix="transcribe_chunks_")
     normalized_path = os.path.join(working_dir, "normalized.wav")
@@ -184,7 +238,13 @@ def transcribe_with_chunking(input_path: str):
             f"✅ Completed chunked transcription with {len(chunk_texts)} successful chunks out of {len(chunk_paths)}",
             flush=True,
         )
-        return "\n\n".join(chunk_texts).strip()
+
+        combined_text = deduplicate_overlap_between_chunks(chunk_texts)
+        print(
+            f"🧩 Deduplicated overlapping chunk text. Raw chunks: {len(chunk_texts)}, final chars: {len(combined_text)}",
+            flush=True,
+        )
+        return combined_text
     finally:
         for path in glob.glob(os.path.join(working_dir, "*")):
             try:
