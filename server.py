@@ -248,6 +248,81 @@ def remove_adjacent_near_duplicate_passages(text: str) -> str:
     return "\n\n".join(cleaned).strip()
 
 
+# --- Additional Hebrew transcript cleaning helpers ---
+
+def paragraph_split(text: str) -> list[str]:
+    text = (text or "").strip()
+    if not text:
+        return []
+    return [p.strip() for p in re.split(r"\n{2,}", text) if p and p.strip()]
+
+
+def remove_duplicate_paragraphs_preserve_order(text: str) -> str:
+    paragraphs = paragraph_split(text)
+    if not paragraphs:
+        return (text or "").strip()
+
+    seen = set()
+    cleaned = []
+
+    for paragraph in paragraphs:
+        normalized = normalize_text_for_dedup(paragraph)
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        cleaned.append(paragraph)
+
+    return "\n\n".join(cleaned).strip()
+
+
+def strip_foreign_intrusion_paragraphs(text: str) -> str:
+    paragraphs = paragraph_split(text)
+    if not paragraphs:
+        return (text or "").strip()
+
+    cleaned = []
+
+    for paragraph in paragraphs:
+        hebrew_chars = len(re.findall(r"[\u0590-\u05FF]", paragraph))
+        latin_chars = len(re.findall(r"[A-Za-z]", paragraph))
+
+        # Drop clearly foreign / hallucinated English passages inside Hebrew transcripts.
+        if latin_chars >= 30 and hebrew_chars == 0:
+            continue
+
+        if latin_chars >= 40 and hebrew_chars < 12:
+            continue
+
+        cleaned.append(paragraph)
+
+    return "\n\n".join(cleaned).strip()
+
+
+def collapse_adjacent_repeated_sentences(text: str) -> str:
+    text = (text or "").strip()
+    if not text:
+        return ""
+
+    sentences = re.split(r"(?<=[.!?])\s+", text)
+    sentences = [s.strip() for s in sentences if s and s.strip()]
+    if not sentences:
+        return text
+
+    cleaned = []
+    previous_norm = None
+
+    for sentence in sentences:
+        current_norm = normalize_text_for_dedup(sentence)
+        if not current_norm:
+            continue
+        if current_norm == previous_norm:
+            continue
+        cleaned.append(sentence)
+        previous_norm = current_norm
+
+    return " ".join(cleaned).strip()
+
+
 def transcribe_with_chunking(input_path: str):
     working_dir = tempfile.mkdtemp(prefix="transcribe_chunks_")
     normalized_path = os.path.join(working_dir, "normalized.wav")
@@ -399,6 +474,10 @@ def clean_hebrew_transcript(text: str) -> str:
 
     text = apply_phrase_replacements(text)
     text = strip_trailing_promos(text)
+    text = strip_foreign_intrusion_paragraphs(text)
+    text = remove_adjacent_near_duplicate_passages(text)
+    text = remove_duplicate_paragraphs_preserve_order(text)
+    text = collapse_adjacent_repeated_sentences(text)
     text = re.sub(r"\bשתיים\.\s*נתחיל בהתחלה\.\b", "2. נתחיל בהתחלה.", text)
     text = re.sub(r"\bשלוש\.\s*החברה החרדית\b", "3. החברה החרדית", text)
     text = re.sub(r"\bארבע\.\s*מצוקת הדיור\b", "4. מצוקת הדיור", text)
@@ -1368,12 +1447,14 @@ def transcribe():
             }), 500
         cleaned_text = basic_cleanup(raw_text)
         cleaned_text = fix_mixed_text(cleaned_text)
+        cleaned_text = strip_foreign_intrusion_paragraphs(cleaned_text)
         cleaned_text = clean_hebrew_transcript(cleaned_text)
 
         if contains_hebrew(cleaned_text) and 1200 <= len(cleaned_text) <= 18000:
             print("🛠️ Starting AI Hebrew transcript repair", flush=True)
             try:
-                cleaned_text = repair_hebrew_transcript_with_ai(cleaned_text, max_chars=5000)
+                cleaned_text = repair_hebrew_transcript_with_ai(cleaned_text, max_chars=3000)
+                cleaned_text = strip_foreign_intrusion_paragraphs(cleaned_text)
                 cleaned_text = clean_hebrew_transcript(cleaned_text)
                 print("✅ AI Hebrew transcript repair completed", flush=True)
             except Exception as transcript_repair_error:
