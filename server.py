@@ -43,7 +43,8 @@ client = OpenAI(
 
 
 TRANSCRIPTION_CHUNK_SECONDS = int(os.getenv("TRANSCRIPTION_CHUNK_SECONDS", "60"))
-FFMPEG_AUDIO_RATE = os.getenv("FFMPEG_AUDIO_RATE", "8000")
+TRANSCRIPTION_CHUNK_OVERLAP_SECONDS = float(os.getenv("TRANSCRIPTION_CHUNK_OVERLAP_SECONDS", "8"))
+FFMPEG_AUDIO_RATE = os.getenv("FFMPEG_AUDIO_RATE", "16000")
 FFMPEG_AUDIO_CHANNELS = os.getenv("FFMPEG_AUDIO_CHANNELS", "1")
 
 
@@ -72,18 +73,65 @@ def normalize_audio_for_transcription(input_path: str, output_path: str):
     ])
 
 
+def get_audio_duration_seconds(input_path: str) -> float:
+    completed = subprocess.run(
+        [
+            "ffprobe",
+            "-v", "error",
+            "-show_entries", "format=duration",
+            "-of", "default=noprint_wrappers=1:nokey=1",
+            input_path,
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    if completed.returncode != 0:
+        raise RuntimeError(completed.stderr.strip() or "ffprobe command failed")
+
+    output = (completed.stdout or "").strip()
+    if not output:
+        raise RuntimeError("ffprobe returned empty duration")
+
+    return float(output)
+
+
 def split_audio_into_chunks(input_path: str, output_dir: str, chunk_seconds: int):
-    pattern = os.path.join(output_dir, "chunk_%03d.wav")
-    run_ffmpeg_command([
-        "ffmpeg",
-        "-y",
-        "-i", input_path,
-        "-f", "segment",
-        "-segment_time", str(chunk_seconds),
-        "-c", "copy",
-        pattern,
-    ])
-    return sorted(glob.glob(os.path.join(output_dir, "chunk_*.wav")))
+    total_duration = get_audio_duration_seconds(input_path)
+    overlap_seconds = max(0.0, TRANSCRIPTION_CHUNK_OVERLAP_SECONDS)
+
+    if overlap_seconds >= float(chunk_seconds):
+        raise RuntimeError("TRANSCRIPTION_CHUNK_OVERLAP_SECONDS must be smaller than TRANSCRIPTION_CHUNK_SECONDS")
+
+    step_seconds = float(chunk_seconds) - overlap_seconds
+    chunk_paths = []
+    start_seconds = 0.0
+    chunk_index = 1
+
+    while start_seconds < total_duration:
+        remaining = max(0.0, total_duration - start_seconds)
+        current_duration = min(float(chunk_seconds), remaining)
+        chunk_path = os.path.join(output_dir, f"chunk_{chunk_index:03d}.wav")
+
+        run_ffmpeg_command([
+            "ffmpeg",
+            "-y",
+            "-ss", f"{start_seconds:.3f}",
+            "-t", f"{current_duration:.3f}",
+            "-i", input_path,
+            "-c:a", "pcm_s16le",
+            chunk_path,
+        ])
+
+        chunk_paths.append(chunk_path)
+        chunk_index += 1
+
+        if current_duration < float(chunk_seconds):
+            break
+
+        start_seconds += step_seconds
+
+    return chunk_paths
 
 
 def transcribe_audio_file_with_openai(audio_path: str):
