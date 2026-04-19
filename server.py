@@ -1371,15 +1371,15 @@ def transcribe():
         cleaned_text = clean_hebrew_transcript(cleaned_text)
 
         if contains_hebrew(cleaned_text) and 1200 <= len(cleaned_text) <= 18000:
-    print("🛠️ Starting AI Hebrew transcript repair", flush=True)
-    try:
-        cleaned_text = repair_hebrew_transcript_with_ai(cleaned_text, max_chars=5000)
-        cleaned_text = clean_hebrew_transcript(cleaned_text)
-        print("✅ AI Hebrew transcript repair completed", flush=True)
-    except Exception as transcript_repair_error:
-        print(f"❌ AI Hebrew transcript repair failed: {transcript_repair_error}", flush=True)
-elif contains_hebrew(cleaned_text) and len(cleaned_text) > 18000:
-    print("⏭️ Skipping AI Hebrew transcript repair for long transcript", flush=True)
+            print("🛠️ Starting AI Hebrew transcript repair", flush=True)
+            try:
+                cleaned_text = repair_hebrew_transcript_with_ai(cleaned_text, max_chars=5000)
+                cleaned_text = clean_hebrew_transcript(cleaned_text)
+                print("✅ AI Hebrew transcript repair completed", flush=True)
+            except Exception as transcript_repair_error:
+                print(f"❌ AI Hebrew transcript repair failed: {transcript_repair_error}", flush=True)
+        elif contains_hebrew(cleaned_text) and len(cleaned_text) > 18000:
+            print("⏭️ Skipping AI Hebrew transcript repair for long transcript", flush=True)
 
         formatted_text = add_readable_paragraphs(cleaned_text)
         analysis_input = build_analysis_input(formatted_text)
