@@ -208,6 +208,46 @@ def deduplicate_overlap_between_chunks(chunk_texts: list[str], max_overlap_sente
     return deduped
 
 
+# --- Remove adjacent near-duplicate passages helper ---
+def remove_adjacent_near_duplicate_passages(text: str) -> str:
+    text = (text or "").strip()
+    if not text:
+        return ""
+
+    passages = [p.strip() for p in re.split(r"\n{2,}", text) if p.strip()]
+    if not passages:
+        return text
+
+    cleaned: list[str] = []
+
+    for passage in passages:
+        current_norm = normalize_text_for_dedup(passage)
+
+        if not cleaned:
+            cleaned.append(passage)
+            continue
+
+        previous = cleaned[-1]
+        previous_norm = normalize_text_for_dedup(previous)
+
+        if not current_norm:
+            continue
+
+        if current_norm == previous_norm:
+            continue
+
+        if current_norm in previous_norm:
+            continue
+
+        if previous_norm in current_norm:
+            cleaned[-1] = passage
+            continue
+
+        cleaned.append(passage)
+
+    return "\n\n".join(cleaned).strip()
+
+
 def transcribe_with_chunking(input_path: str):
     working_dir = tempfile.mkdtemp(prefix="transcribe_chunks_")
     normalized_path = os.path.join(working_dir, "normalized.wav")
@@ -240,6 +280,7 @@ def transcribe_with_chunking(input_path: str):
         )
 
         combined_text = deduplicate_overlap_between_chunks(chunk_texts)
+        combined_text = remove_adjacent_near_duplicate_passages(combined_text)
         print(
             f"🧩 Deduplicated overlapping chunk text. Raw chunks: {len(chunk_texts)}, final chars: {len(combined_text)}",
             flush=True,
